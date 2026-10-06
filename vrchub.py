@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.6.0"
+APP_VERSION = "4.7.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -824,6 +824,15 @@ Extras - AFK, stopwatch, countdown, clock, gesture cycler,
 Connections - VRCX websocket, live OSC listener, app detection
 Launcher - launch VRChat/VRCX/VRCOSC/MagicChatbox
 Help - this page
+
+LIGHT SYNC (Geeni/Tuya bulbs, optional)
+---------------------------------------
+pip install Pillow tinytuya, then in Extras fill:
+- Device IP: from your router's device list
+- Device ID + Local key: use tinytuya's wizard
+  (python -m tinytuya wizard) which scans and shows both.
+Values save to your local config only. Start = your room
+matches the screen; stop = same button.
 
 TROUBLESHOOTING
 ---------------
@@ -2315,6 +2324,31 @@ class VRCHubApp(tk.Tk):
         ttk.Button(f, text="Open desktop overlay",
                    command=self._open_overlay).grid(row=4, column=0,
                                                     sticky="w", pady=3)
+        ls = ttk.LabelFrame(f, text="Screen light sync (Geeni/Tuya bulbs)",
+                            padding=6)
+        lrow = ttk.Frame(ls); lrow.pack(fill="x")
+        ttk.Label(lrow, text="Device IP:").pack(side="left")
+        self.ls_ip = ttk.Entry(lrow, width=14)
+        self.ls_ip.insert(0, self.cfg.get("ls_ip", ""))
+        self.ls_ip.pack(side="left", padx=3)
+        ttk.Label(lrow, text="Device ID:").pack(side="left")
+        self.ls_id = ttk.Entry(lrow, width=18)
+        self.ls_id.insert(0, self.cfg.get("ls_id", ""))
+        self.ls_id.pack(side="left", padx=3)
+        ttk.Label(lrow, text="Local key:").pack(side="left")
+        self.ls_key = ttk.Entry(lrow, width=14, show="*")
+        self.ls_key.insert(0, self.cfg.get("ls_key", ""))
+        self.ls_key.pack(side="left", padx=3)
+        ttk.Label(lrow, text="Bright %:").pack(side="left")
+        self.ls_bri = ttk.Scale(lrow, from_=10, to=100,
+                               value=self.cfg.get("ls_bri", 80))
+        self.ls_bri.pack(side="left", padx=3)
+        ttk.Button(lrow, text="Start", width=7,
+                   command=self._light_sync_toggle).pack(side="left",
+                                                          padx=3)
+        self.ls_state = ttk.Label(lrow, text="off")
+        self.ls_state.pack(side="left", padx=4)
+        ls.grid(row=5, column=0, sticky="ew", pady=3)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
         cd.grid(row=6, column=0, sticky="ew", pady=3, columnspan=1)
         ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
@@ -2450,6 +2484,83 @@ class VRCHubApp(tk.Tk):
         ov.geometry("+%d+%d" % (self.winfo_screenwidth() - 320, 60))
         tick()
         self.status("Overlay open (drag = move, right-click = close).")
+
+    def _light_sync_toggle(self):
+        """Ambilight: average screen color -> Geeni/Tuya bulb.
+        Optional deps: pip install Pillow tinytuya. Keys stay local."""
+        if getattr(self, "_ls_on", False):
+            self._ls_on = False
+            self.ls_state.config(text="off")
+            self.status("Light sync stopped.")
+            return
+        try:
+            import tinytuya  # noqa
+            import PIL.ImageGrab  # noqa
+        except ImportError:
+            self.status("Light sync needs: pip install Pillow tinytuya")
+            return
+        ip = self.ls_ip.get().strip()
+        did = self.ls_id.get().strip()
+        key = self.ls_key.get().strip()
+        if not (ip and did and key):
+            self.status("Light sync: fill IP, device ID, local key "
+                        "(see Help tab).")
+            return
+        for k, v in (("ls_ip", ip), ("ls_id", did), ("ls_key", key),
+                     ("ls_bri", self.ls_bri.get())):
+            self.cfg[k] = v
+        save_config(self.cfg)
+        self._ls_on = True
+        self.ls_state.config(text="ON")
+
+        def work():
+            import tinytuya
+            import PIL.ImageGrab as IG
+            bulb = tinytuya.BulbDevice(did, ip, key)
+            bulb.set_version(3.3)
+            last = None
+            while getattr(self, "_ls_on", False):
+                try:
+                    img = IG.grab().resize((24, 14))
+                    px = list(img.getdata())
+                    n = len(px)
+                    r = sum(p[0] for p in px) // n
+                    g = sum(p[1] for p in px) // n
+                    b = sum(p[2] for p in px) // n
+                    # skip if barely changed
+                    if last and abs(r - last[0]) + abs(g - last[1]) \
+                            + abs(b - last[2]) < 18:
+                        time.sleep(0.8)
+                        continue
+                    last = (r, g, b)
+                    mx, mn = max(r, g, b), min(r, g, b)
+                    v = (mx * self.ls_bri.get()) // 100
+                    if mx == 0:
+                        bulb.set_state(False)
+                    else:
+                        s = 0 if mx == mn else round(
+                            (mx - mn) * 255 / mx)
+                        if s < 25:  # near-white
+                            bulb.set_white(v, s)
+                        else:
+                            h = 0
+                            if mx == r:
+                                h = (60 * (g - b) // (mx - mn)) % 360
+                            elif mx == g:
+                                h = (60 * (b - r) // (mx - mn)) + 120
+                            else:
+                                h = (60 * (r - g) // (mx - mn)) + 240
+                            bulb.set_colour(h, s, v)
+                    time.sleep(0.8)
+                except Exception as e:
+                    self._ls_on = False
+                    self.after(0, lambda: (self.ls_state.config(
+                        text="off"), self.status(
+                        "Light sync error: %s" % str(e)[:50])))
+                    return
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Light sync on (Ctrl+ not needed; stop = same "
+                    "button).")
 
     def _toggle_countdown(self):
         if self.cd_running:
