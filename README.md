@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.7** | |
+| Screen light sync (Ambilight) — room bulb color matches the game screen; works with Tuya-based Geeni bulbs | user request |
 | **NEW in 4.6** | |
 | Desktop overlay — always-on-top mini window (clock, status, quick chatbox send) | MagicChatbox-style |
 | Remaining official input endpoints (Spin, QuickMenu toggle) + VR compatibility notes | VRChat OSC |
@@ -106,7 +108,3 @@ Standing on the shoulders of [VRCX](https://github.com/vrcx/VRCX), [VRCOSC](http
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-## Honest origin note
-
-VRCHub was mostly built by AI (a Base44 Superagent pair-programming with the owner, October 2026). Design decisions, feature sweep, and code are AI-generated; human so far is the idea man, tester, and boss. As volunteer contributors come in, expect that balance to shift. Bugs you find may be machine-made — report them anyway.
