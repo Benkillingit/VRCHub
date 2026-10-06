@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.3.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -831,6 +831,9 @@ class VRCHubApp(tk.Tk):
         self.pul_running = False
         self.pul_ws = None
         self._wear_start = None
+        self._last_media_title = ""
+        self._media_last_sent = None
+        self.clock_running = False
         self.friend_watch_running = False
         self._friend_states = {}
         self.afk_running = False
@@ -1450,6 +1453,10 @@ class VRCHubApp(tk.Tk):
         self.media_btn = ttk.Button(side, text="Show in chatbox",
                                     command=self._toggle_media)
         self.media_btn.pack(fill="x", pady=2)
+        self.media_change_only = tk.BooleanVar(value=False)
+        ttk.Checkbutton(side, text="Only announce on track change "
+                                   "(VRCOSC request)",
+                        variable=self.media_change_only).pack(fill="x")
 
         # Twitch
         tw = ttk.LabelFrame(f, text="Twitch chat relay (VRCOSC-style)", padding=6)
@@ -1522,7 +1529,11 @@ class VRCHubApp(tk.Tk):
                     cur = track
                 elif title not in titles:
                     cur = track or title
-                self.osc.chatbox("🎵 " + cur)
+                self._last_media_title = cur
+                if (not self.media_change_only.get()
+                        or cur != self._media_last_sent):
+                    self.osc.chatbox("🎵 " + cur)
+                    self._media_last_sent = cur
                 for _ in range(150):  # re-read every 15s
                     if not self.media_running:
                         return
@@ -1854,6 +1865,12 @@ class VRCHubApp(tk.Tk):
             row=0, column=3, padx=8)
         ttk.Button(ss, text="Check now", command=self._sysstat_check_show).grid(
             row=0, column=4)
+        self.combo_media = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ss, text="Include current media title (needs Media "
+                                 "tab running)",
+                        variable=self.combo_media).grid(row=1, column=0,
+                                                        columnspan=5,
+                                                        sticky="w")
 
         ps = ttk.LabelFrame(f, text="PiShock (VRCOSC module - YOUR collar "
                                     "only)", padding=6)
@@ -1874,11 +1891,24 @@ class VRCHubApp(tk.Tk):
         ttk.Label(ps, text="settings stay in this session only").grid(
             row=0, column=8, padx=6)
 
+        ck = ttk.LabelFrame(f, text="Clock in chatbox (VRCOSC clock module)",
+                            padding=6)
+        ck.grid(row=5, column=0, sticky="ew", pady=3)
+        ttk.Label(ck, text="Every (sec):").grid(row=0, column=0)
+        self.clock_secs = ttk.Spinbox(ck, from_=10, to=3600, width=4,
+                                      value=60)
+        self.clock_secs.grid(row=0, column=1, padx=4)
+        self.clock_btn = ttk.Button(ck, text="Start",
+                                    command=self._toggle_clock)
+        self.clock_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(ck, text="- time in chatbox, refreshed live").grid(
+            row=0, column=3, padx=8)
+
         self.extras_log = scrolledtext.ScrolledText(f, height=6,
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -1918,6 +1948,30 @@ class VRCHubApp(tk.Tk):
                 self.after(0, bad)
         threading.Thread(target=work, daemon=True).start()
         self.status("PiShock sending...")
+
+    def _toggle_clock(self):
+        if self.clock_running:
+            self.clock_running = False
+            self.clock_btn.config(text="Start")
+            self.status("Clock off.")
+            return
+        try:
+            secs = max(10, int(float(self.clock_secs.get())))
+        except ValueError:
+            secs = 60
+
+        def run():
+            self.clock_running = True
+            self.clock_btn.config(text="Stop")
+            while self.clock_running:
+                self.osc.chatbox(time.strftime("%I:%M %p").lstrip("0"))
+                for _ in range(secs * 10):
+                    if not self.clock_running:
+                        return
+                    time.sleep(0.1)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Clock on (%ds)." % secs)
 
     def _toggle_afk(self):
         if self.afk_running:
@@ -2009,6 +2063,8 @@ class VRCHubApp(tk.Tk):
         batt = battery_percent()
         ram = ram_usage()
         parts = []
+        if self.combo_media.get() and getattr(self, "_last_media_title", ""):
+            parts.append("🎵 %s" % self._last_media_title[:40])
         if batt is not None:
             parts.append("Battery %d%%" % batt)
         if ram:
