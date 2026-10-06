@@ -1053,6 +1053,18 @@ Avatar not hot-swapping? Equip needs you to be in a world, not the
 login screen.
 Login failing? VRChat logins with 2FA: use your authenticator app code.
 Full docs: DOCS.md in the GitHub repo.
+
+
+WHAT'S WHERE (v6.2-6.4 quick map)
+---------------------------------
+- Web API tab: search all VRChat users, view profiles, send friend
+  requests/messages, manage favorites (avatars/worlds/friends),
+  groups, quests, VRC+ status.
+- Extras tab: OSC input control (move/jump/run your avatar from here),
+  MIDI piano (for piano worlds), avatar quick-swap by ID, crash guard,
+  net speed, PiShock, clock+weather.
+- Worlds tab: paste a full world LINK into search to open it instantly.
+- Friends tab: star friends (Fave) and check "Faves online".
 """
 
 # Face tracking: MediaPipe blendshape -> VRChat FT parameter (v2/ names)
