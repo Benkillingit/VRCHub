@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.6.1"
+APP_VERSION = "6.7.0"
 
 # VRCNext-style dark palette
 VRN_BG = "#15171c"      # window background
@@ -83,10 +83,38 @@ NAV_SUBS = {0: "Send text to the VRChat chatbox",
             7: "Load extra features",
             10: "Docs and getting started",
             12: "Borrowed from VRCNext"}
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
-ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
-TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
-PLUGIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+def _data_dir():
+    """Stable folder that survives restarts (also fixes PyInstaller
+    onefile writing config into the deleted _MEI temp dir)."""
+    base = os.path.join(os.environ.get("APPDATA")
+                        or os.path.expanduser("~"), "VRCHub")
+    try:
+        os.makedirs(base, exist_ok=True)
+        return base
+    except OSError:
+        return os.path.dirname(os.path.abspath(__file__))
+
+
+_DATA_DIR = _data_dir()
+CONFIG_FILE = os.path.join(_DATA_DIR, "vrchub_config.json")
+ACTIVITY_FILE = os.path.join(_DATA_DIR, "vrchub_activity.json")
+TOGETHER_FILE = os.path.join(_DATA_DIR, "vrchub_together.json")
+PLUGIN_DIR = os.path.join(_DATA_DIR, "plugins")
+
+# one-time migration from any legacy location
+if not os.path.isfile(CONFIG_FILE):
+    for _cand in (os.path.dirname(os.path.abspath(
+                      sys.executable if getattr(sys, "frozen", False)
+                      else __file__)),
+                  os.path.dirname(os.path.abspath(__file__))):
+        _legacy = os.path.join(_cand, "vrchub_config.json")
+        if os.path.isfile(_legacy):
+            try:
+                import shutil
+                shutil.copyfile(_legacy, CONFIG_FILE)
+            except OSError:
+                pass
+            break
 
 
 def load_plugins():
@@ -278,7 +306,9 @@ class VRChatAPI:
     def me(self):
         status, text = self._request("GET", "/auth/user")
         if status != 200:
-            raise RuntimeError("Session invalid — log in again.")
+            raise RuntimeError(
+                "Session invalid (HTTP %d) — log in again or run Auto "
+                "setup." % status)
         return self._json(text)
 
     # ---- features
@@ -933,6 +963,35 @@ def vrchat_files_scan():
         if c and os.path.isfile(c):
             out["exe"] = c
             break
+    if not out["exe"]:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT,
+                                r"vrchat\shell\open\command") as k:
+                cmd, _ = winreg.QueryValueEx(k, "")
+                p = (cmd or "").strip('"').split('"')[0].split(" --")[0]
+                if p.lower().endswith("vrchat.exe") and os.path.isfile(p):
+                    out["exe"] = p
+        except (OSError, ImportError):
+            pass
+    if not out["exe"]:
+        try:
+            o = subprocess.check_output(
+                ["wmic", "process", "where", "name='VRChat.exe'",
+                 "get", "ExecutablePath"],
+                stderr=subprocess.DEVNULL,
+                timeout=15).decode("utf-8", "replace")
+            for ln in o.splitlines():
+                ln = ln.strip()
+                if ln.lower().endswith("vrchat.exe") and os.path.isfile(ln):
+                    out["exe"] = ln
+                    break
+        except Exception:
+            pass
+    if not out["exe"]:
+        p = os.path.expandvars(r"%ProgramFiles%\VRChat\VRChat.exe")
+        if os.path.isfile(p):
+            out["exe"] = p
     data = os.path.join(home, "AppData", "LocalLow", "VRChat",
                         "VRChat")
     if os.path.isdir(data):
@@ -941,6 +1000,15 @@ def vrchat_files_scan():
         if os.path.isfile(cfgp):
             out["config"] = cfgp
         oscd = os.path.join(data, "OSCAvatarConfig")
+        if not os.path.isdir(oscd):
+            for dirpath, dirnames, _ in os.walk(data):
+                if dirpath[len(data):].count(os.sep) >= 2:
+                    dirnames[:] = []
+                    continue
+                for d in dirnames:
+                    if d.lower() == "oscavatarconfig":
+                        oscd = os.path.join(dirpath, d)
+                        break
         if os.path.isdir(oscd):
             out["osc_cfg_dir"] = oscd
         lp = os.path.join(data, "output.log")
@@ -2057,7 +2125,11 @@ class VRCHubApp(tk.Tk):
                         vcfg = json.load(fh)
                     tok = vcfg.get("auth") or vcfg.get("authCookie")
                     if tok:
-                        self.api.load_cookies({"auth": tok})
+                        cks = {"auth": tok}
+                        if vcfg.get("twoFactorAuth"):
+                            cks["twoFactorAuth"] = vcfg[
+                                "twoFactorAuth"]
+                        self.api.load_cookies(cks)
                         me = self.api.me()
                         self.cfg["vrchat_cookies"] = self.api.cookies()
                         save_config(self.cfg)
@@ -2066,8 +2138,12 @@ class VRCHubApp(tk.Tk):
                             self.vrc_me_label.config(
                                 text="Auto-login: %s" % logged)
                         self.after(0, ok)
-                except Exception:
-                    pass
+                except Exception as ex:
+                    def fail():
+                        self.vrc_me_label.config(
+                            text="Auto-login failed: %s"
+                            % str(ex)[:70])
+                    self.after(0, fail)
             def report():
                 parts = []
                 if found["exe"]:
@@ -5068,10 +5144,11 @@ class VRCHubApp(tk.Tk):
                 "found" if paths.get("osc_cfg_dir") else "not found"))
             # 6. internet
             try:
-                urllib.request.urlopen(
-                    "https://api.vrchat.com/api/1/config",
-                    timeout=8).read(64)
-                line("[OK] internet + VRChat API reachable")
+                st, _ = self.api._request("GET", "/config")
+                if st == 200:
+                    line("[OK] internet + VRChat API reachable")
+                else:
+                    line("[!!] VRChat API returned HTTP %d" % st)
             except Exception as ex:
                 line("[!!] no internet / API blocked: %s" % str(ex)[:60])
             # 7. local network for phone keyboard
