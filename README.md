@@ -74,6 +74,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 6.0 — full ecosystem parity (VRCX / MagicChatbox / VRCOSC / VRC-NEXUS)** | |
+| Clock + weather chatbox module (open-meteo, free, no key); heart rate -> avatar parameter HR (HypeRate + Pulsoid); vault data export/import (JSON backup); "Launch all when VRCHub starts" | VRCX / MCB / VRCOSC |
 | **NEW in 5.9 — VRCNext parity** | |
 | Full VRCNext feature sweep: profile editor (status/bio/pronouns/languages), VRChat messenger (invite/response/requestInvite), instance creator + self-invite + multi-friend invites + join-friend's-world, "who is with me", friend request/unfriend/mutuals, groups (list/search/join/leave), VRC+ gallery management, local playtime stats (time per world, time with each friend) + timeline; avatar list now shows PC/Quest + CURRENT badges; launcher adds SlimeVR/VRCVideoCacher/VRCFaceTracking | VRCNext |
 | **NEW in 5.7** | |
