@@ -43,6 +43,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -51,7 +52,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.8.0"
+APP_VERSION = "4.9.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -943,6 +944,7 @@ class VRCHubApp(tk.Tk):
 
     def _build_ui(self):
         self.status_var = tk.StringVar(value="Ready.")
+        self._banner_build()
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=6, pady=6)
         self._tab_chatbox(nb)
@@ -956,6 +958,7 @@ class VRCHubApp(tk.Tk):
         self._tab_tools(nb)
         self._tab_face(nb)
         self._tab_help(nb)
+        self._banner_refresh()
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
         ttk.Label(sb, textvariable=self.status_var, anchor="w",
@@ -2354,8 +2357,23 @@ class VRCHubApp(tk.Tk):
                         variable=self._dyn_var,
                         command=self._dyn_toggle).grid(
                             row=6, column=0, sticky="w", pady=3)
+        bf = ttk.LabelFrame(f, text="Banner slot (off by default)",
+                            padding=6)
+        brow = ttk.Frame(bf); brow.pack(fill="x")
+        self._ban_on = tk.BooleanVar(value=bool(self.cfg.get("ban_on")))
+        ttk.Checkbutton(brow, text="Show", variable=self._ban_on,
+                        command=self._banner_toggle).pack(side="left")
+        ttk.Label(brow, text="Text:").pack(side="left", padx=(6, 2))
+        self._ban_text = ttk.Entry(brow, width=22)
+        self._ban_text.insert(0, self.cfg.get("ban_text", ""))
+        self._ban_text.pack(side="left", padx=2)
+        ttk.Label(brow, text="URL:").pack(side="left", padx=(6, 2))
+        self._ban_url = ttk.Entry(brow, width=18)
+        self._ban_url.insert(0, self.cfg.get("ban_url", ""))
+        self._ban_url.pack(side="left", padx=2)
+        bf.grid(row=7, column=0, sticky="ew", pady=3)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
-        cd.grid(row=7, column=0, sticky="ew", pady=3, columnspan=1)
+        cd.grid(row=8, column=0, sticky="ew", pady=3, columnspan=1)
         ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
         self.cd_mins = ttk.Spinbox(cd, from_=1, to=180, width=5, value=5)
         self.cd_mins.grid(row=0, column=1, padx=4)
@@ -2369,7 +2387,7 @@ class VRCHubApp(tk.Tk):
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=10, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -2566,6 +2584,41 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
         self.status("Light sync on (Ctrl+ not needed; stop = same "
                     "button).")
+
+    def _banner_build(self):
+        """Slim top banner (ad slot). Hidden unless enabled."""
+        self._ban_frame = tk.Frame(self, bg="#222", height=26)
+        self._ban_label = tk.Label(self._ban_frame, text="", fg="#ffd54f",
+                                   bg="#222", font=("Segoe UI", 9),
+                                   cursor="hand2")
+        self._ban_label.pack(pady=3)
+
+    def _banner_refresh(self):
+        try:
+            if (getattr(self, "_ban_on", None)
+                    and self._ban_on.get()
+                    and self._ban_text.get().strip()):
+                self._ban_label.config(
+                    text="  %s  " % self._ban_text.get().strip())
+                self._ban_label.unbind("<Button-1>")
+                url = self._ban_url.get().strip()
+                if url:
+                    self._ban_label.bind(
+                        "<Button-1>", lambda e: webbrowser.open(url))
+                self._ban_frame.pack(side="top", fill="x", pady=(2, 0))
+            else:
+                self._ban_frame.pack_forget()
+        except tk.TclError:
+            pass
+
+    def _banner_toggle(self):
+        self.cfg["ban_on"] = self._ban_on.get()
+        self.cfg["ban_text"] = self._ban_text.get()
+        self.cfg["ban_url"] = self._ban_url.get()
+        save_config(self.cfg)
+        self._banner_refresh()
+        self.status("Banner %s." % ("on" if self._ban_on.get()
+                                   else "off"))
 
     def _dyn_toggle(self):
         """Dynamic UI: tint the window to the game's screen color.
