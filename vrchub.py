@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.1.0"
+APP_VERSION = "4.2.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -1483,6 +1483,38 @@ class VRCHubApp(tk.Tk):
                        command=lambda n=name: self._set_gesture(n)
                        ).grid(row=0, column=i, padx=3, pady=3)
 
+        ic = ttk.LabelFrame(f, text="VRChat input controls "
+                            "(official /input/ endpoints)", padding=6)
+        ic.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        ttk.Label(ic, text="Tap fires a 0.3s pulse - Toggle holds"
+                  ).grid(row=0, column=0, columnspan=6, sticky="w")
+        self._input_states = {}
+        self._input_taps = [("Jump", "/input/Jump"),
+                            ("Run (toggle)", "/input/Run"),
+                            ("Walk fwd", "/input/MoveForward"),
+                            ("Voice (toggle)", "/input/Voice"),
+                            ("Turn L", "/input/ComfortLeft"),
+                            ("Turn R", "/input/ComfortRight"),
+                            ("Drop L", "/input/DropLeft"),
+                            ("Drop R", "/input/DropRight"),
+                            ("Grab R", "/input/GrabRight"),
+                            ("Use R", "/input/UseRight"),
+                            ("Panic!", "/input/PanicButton")]
+        for i, (label, path) in enumerate(self._input_taps):
+            ttk.Button(ic, text=label, width=11,
+                       command=lambda p=path, l=label:
+                       self._fire_input(l, p)).grid(
+                row=1 + i // 6, column=i % 6, padx=2, pady=2)
+        ico = ttk.LabelFrame(f, text="Switch avatar by ID via OSC "
+                             "(no login needed)", padding=6)
+        ico.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        self.av_id_osc = ttk.Entry(ico, width=46)
+        self.av_id_osc.grid(row=0, column=0, padx=4)
+        ttk.Button(ico, text="Switch", command=self._osc_avatar_change).grid(
+            row=0, column=1, padx=4)
+        ttk.Label(ico, text="paste avtr_... id (from VRCX or avatar URL)"
+                  ).grid(row=0, column=2, padx=6)
+
         io = ttk.LabelFrame(f, text="Inputs", padding=6)
         io.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(12, 0))
         ttk.Button(io, text="Jump", command=lambda: self.osc.input_jump()).grid(
@@ -1495,6 +1527,29 @@ class VRCHubApp(tk.Tk):
             row=0, column=2, padx=3)
         ttk.Label(io, text="(fun with AFK avatars — use responsibly)").grid(
             row=0, column=3, padx=10)
+
+    def _fire_input(self, label, path):
+        toggle = "(toggle)" in label
+        if toggle:
+            on = not self._input_states.get(path, False)
+            self._input_states[path] = on
+            self.osc.send(path, 1 if on else 0)
+            self.status("%s -> %s" % (label, "ON" if on else "OFF"))
+            return
+        self.osc.send(path, 1)
+
+        def off():
+            self.osc.send(path, 0)
+        self.after(300, off)
+        self.status("%s fired." % label)
+
+    def _osc_avatar_change(self):
+        av_id = self.av_id_osc.get().strip()
+        if not av_id.startswith("avtr_"):
+            self.status("Paste an avtr_... avatar ID.")
+            return
+        self.osc.send("/avatar/change", av_id)
+        self.status("Avatar switch sent.")
 
     def _send_param(self):
         name = self.p_name.get().strip()
