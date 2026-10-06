@@ -1,11 +1,11 @@
 # VRCHub — Full Documentation & Tutorial
 
-VRCHub is a single-file (stdlib-only) Python app that combines the useful parts of **VRCX**, **VRCNext**, **VRC-NEXUS**, **VRCOSC**, and **MagicChatbox**: chatbox, avatar control, VRChat account features, media/heart-rate status, Twitch relay, and more — in one Tkinter window with zero dependencies.
+VRCHub is a single-file (stdlib-only) Python app that combines the useful parts of **VRCX**, **VRCNext**, **VRC-NEXUS**, **VRCOSC**, and **MagicChatbox**: chatbox, avatar control, the full VRChat web API, OSC input/MIDI, media/heart-rate status, Twitch relay, smart lighting, and more — in one Tkinter window with zero required dependencies.
 
-- **File:** `vrchub.py` (~2,500 lines, one file)
+- **File:** `vrchub.py` (~5,500 lines, one file)
 - **Requires:** Python 3.8+ (Windows recommended for full features; works on Linux with `xdg-open`)
 - **Repo:** github.com/Benkillingit/VRCHub
-- **Version:** 4.0.0
+- **Version:** 6.4.1
 
 ---
 
@@ -18,11 +18,10 @@ python vrchub.py
 
 1. Have **VRChat running** (desktop or VR).
 2. In VRChat: **Settings → OSC → enabled** (restart VRChat if you just turned it on).
-3. In VRCHub, open the **Chatbox tab**, type something, hit Send. It appears above your head in-game.
+3. Start VRCHub, go to the **Chatbox** tab, type, Send. Your words appear above your head in-game.
+4. Optional extras: run `install.bat` (Windows) or `install.sh` (Linux/macOS) to set up Pillow, tinytuya (light sync), and optional face tracking.
 
-That's the core. Everything else builds on it. If nothing appears in-game, see [Troubleshooting](#8-troubleshooting).
-
-Settings live in `vrchub_config.json` next to the app. Delete it to reset everything.
+Config is saved to `vrchub_config.json` next to the script.
 
 ---
 
@@ -30,195 +29,72 @@ Settings live in `vrchub_config.json` next to the app. Delete it to reset everyt
 
 VRCHub talks to VRChat through four doors:
 
-| Door | What it is | What it gives you |
+| Door | Tech | What it gives you |
 |---|---|---|
-| **OSC out** (UDP 9000) | VRChat's local network protocol | chatbox text, avatar parameters, gestures |
-| **OSC in** (listener) | VRChat sends events back over OSC | live traffic, what other apps are doing |
-| **VRChat REST API** (api.vrchat.com) | your account login | friends, avatars, worlds, notifications, moderation |
+| **Web API** | `api.vrchat.com` (login + auth cookie) | friends, avatars, worlds, instances, groups, favorites, quests, notifications |
+| **OSC** | UDP 9000/9001 to/from the game | chatbox, avatar parameters, input control, MIDI, tracking |
 | **WebSockets** | third-party services | HypeRate/Pulsoid heart rate, Twitch chat, VRCX link |
-
-OSC is the same wire VRCX, VRCOSC, and MagicChatbox all use. VRCHub sends to port 9000 (VRChat's ear) and can listen on a port of yours to see everything flying back and forth.
+| **Local** | your machine | screen light sync, mic chatbox, weather/clock, face tracking, plugins |
 
 ---
 
 ## 3. Tab-by-tab guide
 
 ### Chatbox
-- **Send text** — appears above your head in VRChat. Checkbox controls the notification sound.
-- **Typing indicator** — shows the "typing" animation while you compose.
-- **Cycle lines** — a list that rotates automatically in your chatbox (great for statuses/pronouns).
-- **Scheduled messages (4.0)** — queue a message to send X minutes later; the queue runs in the background.
-- **Quick replies** — one-click presets.
-
-### AI Chat
-Talk to an AI assistant; its replies can be relayed straight into your VRChat chatbox. Useful for in-game banter or NPC-style roleplay.
+Type text, send it to the game. Scheduled messages, typing indicator, media/heart-rate status lines, AFK responder, mic-to-chatbox (voice suite), auto-translate.
 
 ### VRChat API
-- **Login** — your VRChat email + password; TOTP 2FA supported (enter your authenticator code when prompted).
-- **Online friends** — live list with status and world; "Include offline" shows everyone.
-- **Friend watch (3.2)** — toggle "Watch (chatbox alerts)": when a friend goes offline or changes world, you get an alert above your head (polls every 60s).
-- **Block / Mute** — moderation buttons on the selected friend, with confirm dialogs.
-- **Avatars** — "Load my avatars" lists yours; **Equip selected** hot-swaps your avatar *while in a world* (same trick as VRC-NEXUS). Public avatar search included.
-- **Wear times & memos (3.2)** — every avatar you equip gets a running wear-time counter and a memo field (your private notes per avatar). Both persist in the config.
-- **Profiles (3.1)** — save multiple VRChat sessions (cookies) under names, switch accounts instantly. Multi-account support.
-- Session cookies are saved locally in `vrchub_config.json`. Log out of VRChat's website if you want to invalidate them.
+Login with username/password (TOTP 2FA supported). Online/offline friends with instance info, block/mute/unfriend, invites, notifications (accept friend requests), avatar management (search public avatars, equip, favorites, wear times, memos), world search + instance list + join, group management, gallery/files, profile editing.
 
-### Worlds (3.0)
-- **Search** — world search by name; results show author and current occupancy.
-- **Instances** — pick a world, show its live instances; double-click one to open the official `vrchat.com/home/launch` link, approve it in your browser, and VRChat jumps in.
-- **Notifications** — pulls your VRChat notification feed.
+### Web API
+The rest of the web API: search **all** VRChat users, view profiles, send friend requests/messages, manage favorites for avatars/worlds/friends, quests, VRC+ status.
 
 ### Avatar Params
-- Set **any avatar parameter by exact name** (bool/int/float). Find parameter names in VRCX or your avatar descriptor.
-- **Gestures** — one-click gesture buttons (Neutral/Fist/Point/Open/Peace/Rock/Gun/ThumbsUp).
+Live parameter sliders. Any parameter your avatar exposes over OSC can be driven from here.
+
+### Worlds
+Search worlds, list instances, join, or paste a full `vrchat.com/home/launch?...` link into the search box to open it instantly.
 
 ### Media & Chat
-- **Media status** — scan windows, pick your player (Spotify, browsers, anything with the track in its title), and it shows in your chatbox. "Only announce on track change" avoids spam (3.3).
-- **Twitch relay** — your Twitch chat mirrors into your VRChat chatbox (IRC over TLS).
-- **HypeRate** — heart rate from a BLE HR monitor via hypeRate.com; BPM shows in chatbox.
-- **Pulsoid (3.1)** — alternative heart-rate source; paste your Pulsoid token.
+Spotify/media status in the chatbox, Twitch chat relay, HypeRate/Pulsoid heart rate, lyrics (LRCLIB), server status check.
+
+### Connections
+Discord RPC, VRCX relay (live events), OSC router echo, phone remote keyboard (type on your phone, appears in chatbox).
 
 ### Extras
-| Feature | What it does |
-|---|---|
-| **AFK detection** | after X minutes of no VRCHub activity, sends "AFK"; sends "I'm back!" when you act again |
-| **Chatbox stopwatch** | running timer in your chatbox |
-| **Countdown (4.0)** | counts down from N minutes, then blasts "GO!" with a sound |
-| **Clock** | current time in your chatbox, refreshed on an interval |
-| **Random gesture cycler** | fires a random gesture for 3s every N seconds |
-| **System status** | battery % + RAM in your chatbox (Windows); optional media-title combo line |
-| **PiShock** | your own shock collar only — vibe/shock buttons via the PiShock web API; settings are session-only |
+OSC input control (move/jump/run your avatar from the app), MIDI piano for piano worlds, head nod/shake, avatar quick-swap by ID, crash guard, net speed test, PiShock, clock+weather.
 
-Note: AFK counts VRCHub-side activity (messages you send from this app), not keyboard/mouse input.
+### Face Track
+Optional webcam face tracking → OSC (needs `opencv-python mediapipe`, offered by the installer).
 
-### Saved avatars vault (4.3)
-VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel on the VRChat API tab stores any number of avatars locally (`saved_avatars` in `vrchub_config.json`):
-- **Save selected** — saves the avatar highlighted in your avatar list. No selection? Paste an `avtr_...` ID into the search box and hit Save selected to add it manually.
-- **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
-- **Delete** — removes it from your vault only.
+### AI Chat
+Talk to the Bas44 ghost inside the app; optionally relay replies to your chatbox.
 
-### Dynamic UI (4.8)
-Extras → **Dynamic UI** checkbox: the whole window tints to match the game on screen (35% game color blended on near-black, white text — readable in any world). Updates ~1x/2s while on. Turning it off restores your normal system theme. Optional dep: Pillow. Shares the same screen-grab technique as light sync; running both is fine.
+### Plugins
+Drop a `.py` in `plugins/` and it appears as a panel — see **PLUGINS.md**.
 
-### Screen light sync (4.7)
-Ambilight for VRChat: Extras → **Screen light sync**. Grabs the screen ~1x/second, averages the color, and drives a Tuya-based Geeni bulb to match (neon world = neon room). Optional deps: `pip install Pillow tinytuya`. Get Device ID + Local key with `python -m tinytuya wizard` (same LAN). Values stay in local config. Sends only on meaningful color change to avoid spamming the bulb. Note: this matches *screen* color; VRChat does not expose scene lighting to external apps.
-
-### Desktop overlay (4.6)
-Extras → **Open desktop overlay**: a small always-on-top window with a clock, a status line, and a quick chatbox send box. Drag to move it, right-click to close, Enter sends. 85% opacity, no window chrome. Meant for desktop-mode play; on Linux some compositors ignore always-on-top.
-
-### Does VRCHub work in VR? (4.6)
-Yes, unchanged. VRCHub never renders anything inside VRChat — it talks over your local network (OSC/UDP and the VRChat API), which behaves identically whether VRChat is on your monitor or in your headset. Run VRCHub on the same PC (or LAN host if you edit the OSC host) and it drives your in-VR avatar the same way. What is *not* possible: displaying VRCHub's own window inside VR (that would need a VR engine + headset SDK, not stdlib Python) — the desktop overlay on your monitor is the companion view.
-
-### Search ALL sources (4.5)
-The **Search ALL sources** button runs one query across every avatar database VRCHub can legitimately reach:
-1. **VRChat's public avatar database** (the official one) — now sorted by popularity, 60 results
-2. **Your own avatars**
-3. **Your local vault**
-4. **Your cloud vault** (GitHub database)
-
-Results are merged by avatar ID with a source summary in the status bar. Note: "avatar database" websites that host ripped avatar files are not searched, on purpose — that content is uploaded without creator permission, and wiring those in would put your account at risk. VRChat's own API is the authoritative database and it's fully covered here.
-
-### Cloud vault sync (4.4)
-The vault is now a real database in the cloud, not just a local file:
-- **Create repo** — makes a *private* `vrchub-data` repo under your GitHub account (or point the field at any repo you own).
-- **Push** — uploads your saved avatars to `saved_avatars.json` in that repo. Nothing public; a private repo is only visible to your token.
-- **Pull** — downloads and merges the cloud list into the local vault (union by avatar ID, nothing is lost or overwritten). Run VRCHub on any PC, paste the same token, hit Pull, and your avatars are there.
-- The token is stored in `vrchub_config.json` on each machine you use — treat it like a password. Revoke it on GitHub (Settings → Developer settings) if a machine is lost.
-
-Why GitHub and not "all the avatar databases": there is no public upload API on third-party avatar database sites. VRCHub's own cloud database is the one you control.
-
-Login note: the **Email or username** field accepts either — VRChat's login takes your VRChat username as well as the email on file.
-
-### VRChat input controls & OSC avatar switch (4.2)
-- Params tab → **VRChat input controls**: official `/input/` endpoints straight from VRChat's OSC docs — Jump, Run (toggle), Walk forward, Voice (toggle), Comfort turn L/R, Drop L/R, Grab R, Use R, Panic. Tap buttons fire a 0.3s pulse; toggles hold.
-- **Panic!** maps to `/input/PanicButton` — VRChat's own emergency reset. Handy when an avatar freaks out.
-- **Switch avatar by ID via OSC**: paste any `avtr_...` ID and hit Switch — changes avatar without logging into the API (VRChat must allow OSC avatar changes, on by default in most builds; see Settings → OSC if nothing happens).
-
-### Face Track (4.1, experimental)
-- **What it does**: reads your webcam with MediaPipe, estimates face blendshapes, and sends them to VRChat as face-tracking parameters (`v2/EyeBlink*`, `v2/JawOpen`, `v2/MouthSmile*`, brows, squints).
-- **Setup (once)**: `pip install opencv-python mediapipe`. The ~3.7 MB face model downloads automatically on first run.
-- **Use with a face-tracking-enabled avatar.** Desktop webcam quality won't match a dedicated tracker; VRCFT (the dedicated app) remains the gold standard — this is the zero-extra-hardware path.
-- Everything else in VRCHub still runs without these dependencies installed; the tab just says what's missing.
-- **Stop** before unplugging the camera; Start again with a different camera index if needed.
-
-### Connections (2.1+)
-- **App detection** — Scan lists which of VRChat/VRCX/VRCOSC/MagicChatbox are running and whether VRCX's port is open.
-- **VRCX WebSocket** — enable VRCX → Settings → WebSocket Server (port 9739), set a token, connect here. You see VRCX's live event stream; friend joins/leaves can be auto-announced in your chatbox. (Protocol verified best-effort; the log shows whatever VRCX sends.)
-- **OSC listener** — binds a UDP port (try 9002, VRCX uses 9001) and shows every OSC message flying between VRChat and your other apps. Type in MagicChatbox and watch it appear here — great for learning how it all works.
-
-### Launcher (VRCNext-style)
-Autodetect or paste paths for VRChat / VRCX / VRCOSC / MagicChatbox; "Launch all" starts your whole setup. Paths persist.
+### Launcher
+Launch VRChat and manage launch options.
 
 ### Help
-The quick-start tutorial, in-app.
+In-app quick start and feature map.
 
 ---
 
-## 4. Feature → original app map
+## 4. Troubleshooting
 
-| VRCHub feature | Origin app |
-|---|---|
-| Chatbox, typing, cycle lines | MagicChatbox |
-| Avatar params, gestures, AFK, clock, gesture cycler, stopwatch | VRCOSC |
-| Friends, avatars, worlds, notifications, moderation, profiles, wear times, memos | VRCX / VRCNext |
-| Equip hot-swap | VRC-NEXUS |
-| Media status, Twitch, HR, launcher | all of them |
+- **Nothing appears in-game:** OSC is off in VRChat settings, or a firewall blocks UDP 9000.
+- **Login fails:** check username/password; TOTP codes rotate fast — use the current one.
+- **Light sync does nothing:** needs `pip install Pillow tinytuya` and your bulb's local key.
+- **Face track missing:** run the installer and answer `y` to the face-tracking extras.
+- **A button silently fails:** check the status bar at the bottom of the window first.
 
 ---
 
-## 5. Scheduled messages — how the queue works
+## 5. FAQ
 
-Queued messages go into an in-memory list with a due-timestamp. A background thread wakes, finds the earliest due message, and sends it to OSC when its time arrives. If you close VRCHub, unsent queue items are gone (they're not persisted on purpose — a stale message sent tomorrow is usually a surprise).
+**Is my password stored?** Login cookies are saved locally in your config only if you choose to stay logged in; the password itself is never written to disk after login.
 
----
+**Is this allowed by VRChat?** It uses the same public API and OSC endpoints that VRCX and friends use. Don't automate spam and you'll be fine.
 
-## 6. Security & privacy notes
-
-- Your VRChat session cookie and all settings stay in `vrchub_config.json` on your machine.
-- PiShock credentials are kept in memory for the session only, never written to disk.
-- The AI chat uses your configured key; the NPC relay endpoint is rate-limited per IP.
-- VRCHub sends OSC only to 127.0.0.1 unless you change the host.
-
----
-
-## 7. Version history (short)
-
-- **4.0** — countdown timer, scheduled chatbox messages, in-app Help tab, this documentation
-- **3.3** — chatbox clock, media+hardware combo line, announce-on-track-change, Extras layout fix
-- **3.2** — avatar wear times, avatar memos, friend watcher, block/mute (top-voted GitHub requests)
-- **3.1** — multi-account profiles, Pulsoid HR, PiShock, offline friends
-- **3.0** — Worlds tab, instances+join, notifications, favorites, AFK, stopwatch, gesture cycler, system status
-- **2.1** — VRCX WebSocket link, OSC listener, app detection
-- **2.0** — VRChat API login (TOTP), friends, avatars+equip, public search, Twitch, HypeRate, media status, launcher, AI chat
-- **1.0** — OSC chatbox, params, gestures, cycle lines
-
----
-
-## 8. Troubleshooting
-
-**Nothing shows in my chatbox.**
-VRChat: Settings → OSC → enable, then restart VRChat. Check VRCHub's OSC port matches (9000 default). Firewalls rarely block localhost UDP, but try allowing Python.
-
-**Avatar equip does nothing.**
-You must be in a world (not the menu/login screen). Wait a few seconds; VRChat rate-limits avatar swaps.
-
-**Login fails.**
-Use your authenticator's current code for 2FA. VRChat also locks accounts after repeated failures — wait 15 minutes.
-
-**Twitch relay silent.**
-Needs an IRC-capable Twitch account; Twitch now requires an OAuth token for some accounts (anonymous read works for most channels).
-
-**HypeRate shows nothing.**
-Your phone/watch must be running HypeRate and paired to your device ID first.
-
-**VRCX connect fails.**
-VRCX → Settings → WebSocket Server must be enabled, port 9739, and the token pasted here. The log shows the exact failure.
-
-**System status shows nothing.**
-Battery/RAM queries use Windows APIs; on desktops without a battery only RAM appears. Non-Windows: not supported.
-
-**The Extras tab looks squished.** — that was a 3.2 layout bug, fixed in 3.3. Update your file.
-
----
-
-*Made for Ben, by his Superagent. Stdlib only, one file, forever.*
+**Why single file?** Portability — one file, no installer, no dependencies, runs from a USB stick.
