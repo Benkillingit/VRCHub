@@ -53,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.6.0"
+APP_VERSION = "5.7.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -2603,6 +2603,56 @@ class VRCHubApp(tk.Tk):
         mv = ttk.LabelFrame(f, text="Movement nudge (OSCLeash-style /input/ "
                                     "sliders)", padding=6)
         mv.grid(row=13, column=0, sticky="ew", pady=3)
+        dr = ttk.LabelFrame(f, text="Discord Rich Presence (needs an App ID "
+                                    "from discord.com/developers)", padding=6)
+        dr.grid(row=14, column=0, sticky="ew", pady=3)
+        ttk.Label(dr, text="App ID:").pack(side="left")
+        self.drpc_id = ttk.Entry(dr, width=20)
+        self.drpc_id.pack(side="left", padx=3)
+        ttk.Label(dr, text="Details:").pack(side="left", padx=(6, 0))
+        self.drpc_details = ttk.Entry(dr, width=22)
+        self.drpc_details.insert(0, "in VRChat")
+        self.drpc_details.pack(side="left", padx=3)
+        self.drpc_btn = ttk.Button(dr, text="Start", width=7,
+                                   command=self._drpc_toggle)
+        self.drpc_btn.pack(side="left", padx=6)
+        ttk.Label(dr, text="State:").pack(side="left", padx=(6, 0))
+        self.drpc_state = ttk.Entry(dr, width=18)
+        self.drpc_state.insert(0, "via VRCHub")
+        self.drpc_state.pack(side="left", padx=3)
+
+        rb = ttk.LabelFrame(f, text="Rules - when a parameter changes, do "
+                                    "something (VRCOSC-style)", padding=6)
+        rb.grid(row=15, column=0, sticky="ew", pady=3)
+        rowb = ttk.Frame(rb); rowb.pack(fill="x")
+        ttk.Label(rowb, text="Param:").pack(side="left")
+        self.rule_param = ttk.Entry(rowb, width=12)
+        self.rule_param.pack(side="left", padx=2)
+        self.rule_cond = ttk.Combobox(rowb, width=2, state="readonly",
+                                      values=("==", ">", "<"))
+        self.rule_cond.set("=="); self.rule_cond.pack(side="left", padx=2)
+        self.rule_val = ttk.Entry(rowb, width=5)
+        self.rule_val.insert(0, "1")
+        self.rule_val.pack(side="left", padx=2)
+        self.rule_act = ttk.Combobox(rowb, width=8, state="readonly",
+                                     values=("chatbox", "param"))
+        self.rule_act.set("chatbox"); self.rule_act.pack(side="left", padx=2)
+        self.rule_arg = ttk.Entry(rowb, width=20)
+        self.rule_arg.pack(side="left", padx=2)
+        ttk.Label(rowb, text="(chatbox text, or Param=1.0)"
+                  ).pack(side="left", padx=2)
+        ttk.Button(rowb, text="Add", command=self._rule_add).pack(
+            side="left", padx=4)
+        self.rule_list = tk.Listbox(rb, height=3)
+        self.rule_list.pack(fill="x", pady=3)
+        rowb2 = ttk.Frame(rb); rowb2.pack(fill="x")
+        self.rules_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(rowb2, text="Rules enabled",
+                        variable=self.rules_on).pack(side="left")
+        ttk.Button(rowb2, text="Delete selected",
+                   command=self._rule_del).pack(side="left", padx=6)
+        self.rules = list(self.cfg.get("rules", []))
+        self._rule_refresh()
         ttk.Label(mv, text="Fwd/back:").pack(side="left")
         self.mv_v = tk.Scale(mv, from_=-1, to=1, resolution=0.1, length=140,
                              orient="horizontal", showvalue=True,
@@ -3383,6 +3433,159 @@ class VRCHubApp(tk.Tk):
         self.mv_v.set(0)
         self.mv_h.set(0)
 
+    # ---- Discord Rich Presence (stdlib IPC, JSON frames)
+
+    def _drpc_pipe(self):
+        if sys.platform == "win32":
+            for i in range(10):
+                try:
+                    return open(r"\\.\pipe\discord-ipc-%d" % i,
+                                "r+b", buffering=0)
+                except OSError:
+                    continue
+        else:
+            for i in range(10):
+                try:
+                    s = socket.socket(socket.AF_UNIX)
+                    s.connect("%s/discord-ipc-%d" % (
+                        os.environ.get("TMPDIR", "/tmp"), i))
+                    return s
+                except OSError:
+                    continue
+        raise OSError("Discord IPC not found (is Discord running?)")
+
+    def _drpc_io(self, sock, op, payload):
+        data = payload.encode() if isinstance(payload, str) else payload
+        raw = struct.pack("<II", op, len(data)) + data
+        fno = sock.fileno() if hasattr(sock, "fileno") else sock
+        if sys.platform == "win32" and hasattr(sock, "fileno") and \
+                not isinstance(sock, socket.socket):
+            os.write(fno, raw)
+        else:
+            os.write(fno, raw)
+
+    def _drpc_toggle(self):
+        if getattr(self, "_drpc_sock", None):
+            try:
+                self._drpc_sock.close()
+            except OSError:
+                pass
+            self._drpc_sock = None
+            self.drpc_btn.config(text="Start")
+            self.status("Rich Presence off (Discord clears it).")
+            return
+        cid = self.drpc_id.get().strip()
+        if not cid.isdigit() or len(cid) < 15:
+            self.status("Paste your Discord App ID "
+                        "(discord.com/developers/applications).")
+            return
+        try:
+            sock = self._drpc_pipe()
+        except OSError as e:
+            self.status(str(e)[:70])
+            return
+        self._drpc_sock = sock
+        self.drpc_btn.config(text="Stop")
+        self.status("Rich Presence connecting...")
+
+        def work():
+            import json as _j
+            try:
+                self._drpc_io(sock, 1, _j.dumps({"v": 1, "client_id": cid}))
+                fno = sock.fileno() if hasattr(sock, "fileno") else sock
+                hdr = b""
+                while len(hdr) < 8:
+                    hdr += os.read(fno, 8 - len(hdr))
+                _op, ln = struct.unpack("<II", hdr)
+                os.read(fno, ln)
+                act = {"details": self.drpc_details.get(),
+                       "state": self.drpc_state.get(),
+                       "timestamps": {"start": int(time.time())}}
+                self._drpc_io(sock, 1, _j.dumps(
+                    {"cmd": "SET_ACTIVITY",
+                     "args": {"pid": os.getpid(), "activity": act},
+                     "nonce": "vrchub"}))
+                self.after(0, lambda: self.status(
+                    "Rich Presence live on your Discord profile."))
+                while True:
+                    os.read(fno, 8)
+            except OSError:
+                self.after(0, lambda: (self.drpc_btn.config(text="Start"),
+                                       self.status("Rich Presence lost "
+                                                   "connection.")))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- rules engine
+
+    def _rule_refresh(self):
+        self.rule_list.delete(0, "end")
+        for r in self.rules:
+            self.rule_list.insert("end", "IF %s %s %s -> %s %s" % (
+                r.get("param"), r.get("cond"), r.get("value"),
+                r.get("act"), r.get("arg")))
+
+    def _rule_add(self):
+        r = {"param": self.rule_param.get().strip(),
+             "cond": self.rule_cond.get(),
+             "value": self.rule_val.get().strip(),
+             "act": self.rule_act.get(),
+             "arg": self.rule_arg.get().strip()}
+        if not r["param"] or not r["arg"]:
+            self.status("Rule needs a param and an action.")
+            return
+        self.rules.append(r)
+        self.cfg["rules"] = self.rules
+        save_config(self.cfg)
+        self._rule_refresh()
+        self.status("Rule added (%d total)." % len(self.rules))
+
+    def _rule_del(self):
+        sel = self.rule_list.curselection()
+        if not sel:
+            self.status("Pick a rule first.")
+            return
+        del self.rules[sel[0]]
+        self.cfg["rules"] = self.rules
+        save_config(self.cfg)
+        self._rule_refresh()
+        self.status("Rule deleted.")
+
+    def _rules_eval(self, addr, args):
+        if not getattr(self, "rules_on", None) or not self.rules_on.get():
+            return
+        if not addr.startswith("/avatar/parameters/"):
+            return
+        name = addr.rsplit("/", 1)[-1]
+        val = args[0] if args else None
+        now = time.time()
+        for r in self.rules:
+            if r.get("param") != name:
+                continue
+            if now - r.get("t", 0) < 2:
+                continue
+            try:
+                v = float(r.get("value", 0))
+                fv = float(val)
+                hit = {"==": abs(fv - v) < 0.01,
+                       ">": fv > v,
+                       "<": fv < v}.get(r.get("cond"), False)
+            except (TypeError, ValueError):
+                hit = str(val) == str(r.get("value"))
+            if hit:
+                r["t"] = now
+                if r.get("act") == "param":
+                    arg = r.get("arg", "")
+                    if "=" in arg:
+                        pn, pv = arg.rsplit("=", 1)
+                        try:
+                            self.osc.send("/avatar/parameters/" + pn,
+                                          float(pv))
+                        except ValueError:
+                            self.osc.send("/avatar/parameters/" + pn, pv)
+                else:
+                    self.after(0, lambda m=r.get("arg", ""):
+                                self._send_chatbox(m))
+
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
         self._ban_frame = tk.Frame(self, bg="#222", height=26)
@@ -3930,6 +4133,7 @@ class VRCHubApp(tk.Tk):
                 tag = "WORLD " if addr.startswith("/world/") else ""
                 self._log_to(self.osc_log, "%s%s %s" % (tag, addr, args))
                 self._router_echo(addr, args)
+                self._rules_eval(addr, args)
                 for p in getattr(self, "plugins", []):
                     hook = getattr(p, "on_osc", None)
                     if hook:
