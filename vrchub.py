@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.7.0"
+APP_VERSION = "4.8.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -2321,6 +2321,7 @@ class VRCHubApp(tk.Tk):
         ttk.Label(ck, text="- time in chatbox, refreshed live").grid(
             row=0, column=3, padx=8)
 
+        self._dyn_var = tk.BooleanVar(value=bool(self.cfg.get("dyn_ui")))
         ttk.Button(f, text="Open desktop overlay",
                    command=self._open_overlay).grid(row=4, column=0,
                                                     sticky="w", pady=3)
@@ -2349,8 +2350,12 @@ class VRCHubApp(tk.Tk):
         self.ls_state = ttk.Label(lrow, text="off")
         self.ls_state.pack(side="left", padx=4)
         ls.grid(row=5, column=0, sticky="ew", pady=3)
+        ttk.Checkbutton(f, text="Dynamic UI: tint window from game color",
+                        variable=self._dyn_var,
+                        command=self._dyn_toggle).grid(
+                            row=6, column=0, sticky="w", pady=3)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
-        cd.grid(row=6, column=0, sticky="ew", pady=3, columnspan=1)
+        cd.grid(row=7, column=0, sticky="ew", pady=3, columnspan=1)
         ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
         self.cd_mins = ttk.Spinbox(cd, from_=1, to=180, width=5, value=5)
         self.cd_mins.grid(row=0, column=1, padx=4)
@@ -2364,7 +2369,7 @@ class VRCHubApp(tk.Tk):
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=8, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=9, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -2561,6 +2566,71 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
         self.status("Light sync on (Ctrl+ not needed; stop = same "
                     "button).")
+
+    def _dyn_toggle(self):
+        """Dynamic UI: tint the window to the game's screen color.
+        Optional dep: Pillow. Runs a light loop, ~1 update/2s."""
+        on = self._dyn_var.get()
+        self.cfg["dyn_ui"] = on
+        save_config(self.cfg)
+        if not on:
+            self._dyn_on = False
+            self.after(100, lambda: self._dyn_apply(None))
+            self.status("Dynamic UI off.")
+            return
+        try:
+            import PIL.ImageGrab  # noqa
+        except ImportError:
+            self._dyn_var.set(False)
+            self.status("Dynamic UI needs: pip install Pillow")
+            return
+        if getattr(self, "_dyn_on", False):
+            return
+        self._dyn_on = True
+
+        def work():
+            import PIL.ImageGrab as IG
+            while getattr(self, "_dyn_on", False):
+                try:
+                    img = IG.grab().resize((24, 14))
+                    px = list(img.getdata())
+                    n = len(px)
+                    r = sum(p[0] for p in px) // n
+                    g = sum(p[1] for p in px) // n
+                    b = sum(p[2] for p in px) // n
+                    # dark tint: 35% game color blended on near-black
+                    tint = (r * 35 // 100 + 16,
+                            g * 35 // 100 + 16,
+                            b * 35 // 100 + 16)
+                    self.after(0, lambda t=tint: self._dyn_apply(t))
+                except Exception:
+                    pass
+                time.sleep(2.0)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Dynamic UI on: window tints to the game.")
+
+    def _dyn_apply(self, tint):
+        """Apply (or clear) the tint to the ttk theme."""
+        st = ttk.Style(self)
+        try:
+            if tint is None:
+                st.theme_use(self._dyn_prev_theme
+                             if hasattr(self, "_dyn_prev_theme")
+                             else st.theme_use())
+                return
+            if not hasattr(self, "_dyn_prev_theme"):
+                self._dyn_prev_theme = st.theme_use()
+            bg = "#%02x%02x%02x" % tint
+            fg = "#e8e8e8"
+            for w in (".", "TFrame", "TLabel", "TLabelFrame",
+                      "TButton", "TCheckbutton", "TEntry", "TNotebook",
+                      "TNotebook.Tab", "TLabelframe.Label", "TScale",
+                      "TScrollbar"):
+                st.configure(w, background=bg, foreground=fg)
+            st.configure("TNotebook.Tab", background="#282828",
+                         foreground=fg)
+        except tk.TclError:
+            pass
 
     def _toggle_countdown(self):
         if self.cd_running:
