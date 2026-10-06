@@ -1,0 +1,24 @@
+name: Build Windows Setup
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyinstaller
+      - run: pyinstaller --onefile --windowed --name VRCHub --clean vrchub.py
+      - run: iscc VRCHub.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vrchub_setup
+          path: installer/vrchub_setup.exe
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: installer/vrchub_setup.exe
