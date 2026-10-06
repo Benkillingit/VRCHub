@@ -74,6 +74,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 6.1 — the "impossible" features, done anyway** | |
+| Crash guard: watches the VRChat process and relaunches into your last world via vrchat:// launch link when it dies (Windows); net speed in chatbox (Cloudflare download test); PiShock control panel (shock/vibe/beep via the public PiShock API); phone page now doubles as a live overlay feed (everything VRCHub reports, on your phone); dashboard view (friends grouped by world) | VRCX / MCB / VRCOSC |
 | **NEW in 6.0 — full ecosystem parity (VRCX / MagicChatbox / VRCOSC / VRC-NEXUS)** | |
 | Clock + weather chatbox module (open-meteo, free, no key); heart rate -> avatar parameter HR (HypeRate + Pulsoid); vault data export/import (JSON backup); "Launch all when VRCHub starts" | VRCX / MCB / VRCOSC |
 | **NEW in 5.9 — VRCNext parity** | |
