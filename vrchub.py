@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.4.0"
+APP_VERSION = "6.4.1"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1667,7 +1667,7 @@ class VRCHubApp(tk.Tk):
                     msg = "Repo already exists."
                 self.after(0, lambda m=msg: self.status(m))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Creating repo...")
 
@@ -1702,7 +1702,7 @@ class VRCHubApp(tk.Tk):
                 self.after(0, lambda: self.status(
                     "Pushed %d avatar(s) to cloud." % len(saved)))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Pushing...")
 
@@ -1729,7 +1729,7 @@ class VRCHubApp(tk.Tk):
                     "Pulled: %d new from cloud, %d total."
                     % (added, len(local))))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Pulling...")
 
@@ -1763,8 +1763,8 @@ class VRCHubApp(tk.Tk):
                     self.status("VRChat login OK.")
                 self.after(0, ok)
             except VRChatAPI.Needs2FA as e:
-                self.after(0, lambda: (self.vrc_me_label.config(
-                    text=str(e)), self.status(str(e))))
+                self.after(0, lambda ex=e: (self.vrc_me_label.config(
+                    text=str(ex)), self.status(str(ex))))
             except Exception as e:
                 msg = str(e)
                 self.after(0, lambda: (self.vrc_me_label.config(text=msg),
@@ -1902,7 +1902,7 @@ class VRCHubApp(tk.Tk):
                 self.after(0, lambda: self.status("%s done: %s"
                                                   % (kind, name)))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("%sing %s..." % (kind, name))
 
@@ -1924,7 +1924,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d friend(s) online." % len(friends))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Loading friends...")
 
@@ -1945,7 +1945,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d avatar(s) loaded." % len(avatars))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Loading avatars...")
 
@@ -1975,7 +1975,7 @@ class VRCHubApp(tk.Tk):
                     self.status("Public search: %d result(s)." % len(avatars))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Searching public avatars...")
 
@@ -1996,8 +1996,8 @@ class VRCHubApp(tk.Tk):
                     a["src"] = "public"
                     results[a["id"]] = a
             except Exception as e:
-                self.after(0, lambda: self.status("Public search: %s"
-                                                  % str(e)[:50]))
+                self.after(0, lambda ex=e: self.status("Public search: %s"
+                                                  % str(ex)[:50]))
             # 2. your own avatars
             try:
                 for a in self.api.my_avatars():
@@ -2055,7 +2055,7 @@ class VRCHubApp(tk.Tk):
                 name = self.avatar_tree.item(av_id, "values")[0]
                 self.after(0, lambda: self._note_equip(av_id, name))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Equipping...")
 
@@ -2427,8 +2427,8 @@ class VRCHubApp(tk.Tk):
                     last_sent = time.time()
             except Exception as e:
                 if self.pul_running:
-                    self.after(0, lambda: self.status(
-                        "Pulsoid error: %s" % e.__class__.__name__))
+                    self.after(0, lambda ex=e: self.status(
+                        "Pulsoid error: %s" % ex.__class__.__name__))
             finally:
                 self.pul_running = False
 
@@ -2481,8 +2481,8 @@ class VRCHubApp(tk.Tk):
                     last_sent = time.time()
             except Exception as e:
                 if self.hr_running:
-                    self.after(0, lambda: self.status(
-                        "HypeRate error: %s" % e.__class__.__name__))
+                    self.after(0, lambda ex=e: self.status(
+                        "HypeRate error: %s" % ex.__class__.__name__))
             finally:
                 self.hr_running = False
 
@@ -2577,7 +2577,7 @@ class VRCHubApp(tk.Tk):
                 self.after(0, lambda: self.status(
                     "Faves online: %s" % (", ".join(names) or "none")))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:70]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:70]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Checking faves...")
 
@@ -2612,7 +2612,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d world(s)." % len(worlds))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Searching worlds...")
 
@@ -2637,7 +2637,7 @@ class VRCHubApp(tk.Tk):
                                                               len(insts)))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Loading instances...")
 
@@ -2679,7 +2679,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d notification(s)." % len(notifs))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:80]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Loading notifications...")
 
@@ -2722,7 +2722,7 @@ class VRCHubApp(tk.Tk):
         ttk.Label(gc, text="- fires a random gesture for 3s").grid(
             row=0, column=3, padx=8)
 
-        ss = ttk.LabelFrame(ss_txt := f, text="System status (VRCNext-style)",
+        ss = ttk.LabelFrame(f, text="System status (VRCNext-style)",
                             padding=6)
         ss.grid(row=3, column=0, sticky="ew", pady=3)
         ttk.Label(ss, text="Every (sec):").grid(row=0, column=0)
@@ -2740,25 +2740,6 @@ class VRCHubApp(tk.Tk):
                         variable=self.combo_media).grid(row=1, column=0,
                                                         columnspan=5,
                                                         sticky="w")
-
-        ps = ttk.LabelFrame(f, text="PiShock (VRCOSC module - YOUR collar "
-                                    "only)", padding=6)
-        ps.grid(row=4, column=0, sticky="ew", pady=3)
-        ttk.Label(ps, text="User:").grid(row=0, column=0)
-        self.ps_user = ttk.Entry(ps, width=12)
-        self.ps_user.grid(row=0, column=1, padx=3)
-        ttk.Label(ps, text="API key:").grid(row=0, column=2)
-        self.ps_key = ttk.Entry(ps, width=14, show="*")
-        self.ps_key.grid(row=0, column=3, padx=3)
-        ttk.Label(ps, text="Code:").grid(row=0, column=4)
-        self.ps_code = ttk.Entry(ps, width=8)
-        self.ps_code.grid(row=0, column=5, padx=3)
-        ttk.Button(ps, text="Test vibe", command=lambda:
-                   self._pishock(1, 20, 1)).grid(row=0, column=6, padx=4)
-        ttk.Button(ps, text="Shock (low, 1s)", command=lambda:
-                   self._pishock(0, 5, 1)).grid(row=0, column=7, padx=4)
-        ttk.Label(ps, text="settings stay in this session only").grid(
-            row=0, column=8, padx=6)
 
         ck = ttk.LabelFrame(f, text="Clock in chatbox (VRCOSC clock module)",
                             padding=6)
@@ -2960,44 +2941,6 @@ class VRCHubApp(tk.Tk):
         self.router_delay.pack(side="left", padx=2)
         f.columnconfigure(0, weight=1)
 
-    def _pishock(self, op, intensity, duration):
-        """PiShock web API. Op: 0=shock, 1=vibrate, 2=beep."""
-        payload = {
-            "Username": self.ps_user.get().strip(),
-            "Apikey": self.ps_key.get().strip(),
-            "Code": self.ps_code.get().strip(),
-            "Name": "VRCHub",
-            "Op": op,
-            "Intensity": intensity,
-            "Duration": duration,
-        }
-        if not all((payload["Username"], payload["Apikey"], payload["Code"])):
-            self.status("Fill PiShock user/key/code first.")
-            return
-
-        def work():
-            try:
-                req = urllib.request.Request(
-                    "https://do.pishock.com/api/apioperate",
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json",
-                             "User-Agent": "VRCHub/" + APP_VERSION})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    body = resp.read().decode("utf-8", "replace")[:80]
-
-                def ok():
-                    self._log_to(self.extras_log, "PiShock ok: %s" % body)
-                    self.status("PiShock sent.")
-                self.after(0, ok)
-            except Exception as e:
-                msg = "PiShock failed: %s" % e.__class__.__name__
-
-                def bad():
-                    self._log_to(self.extras_log, msg)
-                self.after(0, bad)
-        threading.Thread(target=work, daemon=True).start()
-        self.status("PiShock sending...")
-
     def _toggle_clock(self):
         if self.clock_running:
             self.clock_running = False
@@ -3147,9 +3090,9 @@ class VRCHubApp(tk.Tk):
                     time.sleep(0.8)
                 except Exception as e:
                     self._ls_on = False
-                    self.after(0, lambda: (self.ls_state.config(
+                    self.after(0, lambda ex=e: (self.ls_state.config(
                         text="off"), self.status(
-                        "Light sync error: %s" % str(e)[:50])))
+                        "Light sync error: %s" % str(ex)[:50])))
                     return
         threading.Thread(target=work, daemon=True).start()
         self.status("Light sync on (Ctrl+ not needed; stop = same "
@@ -3177,11 +3120,11 @@ class VRCHubApp(tk.Tk):
                            urllib.parse.quote(title),
                            urllib.parse.quote(artist)))
                 req = urllib.request.Request(
-                    url, headers={"User-Agent": VRCAPI.UA})
+                    url, headers={"User-Agent": VRChatAPI.UA})
                 hits = json.load(urllib.request.urlopen(req, timeout=15))
             except Exception as e:
-                self.after(0, lambda: self.status(
-                    "Lyrics fetch failed: %s" % str(e)[:40]))
+                self.after(0, lambda ex=e: self.status(
+                    "Lyrics fetch failed: %s" % str(ex)[:40]))
                 return
             lines = []
             for h in hits or []:
@@ -3259,7 +3202,7 @@ class VRCHubApp(tk.Tk):
             try:
                 req = urllib.request.Request(
                     "https://status.vrchat.com/api/v2/status.json",
-                    headers={"User-Agent": VRCAPI.UA})
+                    headers={"User-Agent": VRChatAPI.UA})
                 d = json.load(urllib.request.urlopen(req, timeout=10))
                 txt = "VRChat servers: " + str(d.get("status", "?"))
             except Exception:
@@ -3361,8 +3304,6 @@ class VRCHubApp(tk.Tk):
     # ---- per-avatar profiles
 
     def _profile_current_avatar(self):
-        me = getattr(self, "_me", None)
-
         def work():
             try:
                 code, text = self.api._request("GET", "/auth/user")
@@ -3376,7 +3317,7 @@ class VRCHubApp(tk.Tk):
                     self.after(0, lambda: self.status(
                         "Log into the VRChat API first."))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:60]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:60]))
         threading.Thread(target=work, daemon=True).start()
 
     def _profile_count(self):
@@ -3437,7 +3378,7 @@ class VRCHubApp(tk.Tk):
                     "Accepted." if accept else "Hidden."))
                 self.after(0, self._load_notifications)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:70]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:70]))
         threading.Thread(target=work, daemon=True).start()
 
     # ---- time spent together
@@ -3542,7 +3483,7 @@ class VRCHubApp(tk.Tk):
                    "?client=gtx&sl=auto&tl=%s&dt=t&q=%s"
                    % (target, urllib.parse.quote(text)))
             req = urllib.request.Request(url, headers={"User-Agent":
-                                                        VRCAPI.UA})
+                                                        VRChatAPI.UA})
             d = json.load(urllib.request.urlopen(req, timeout=12))
             return "".join(part[0] for part in d[0] if part[0])
         except Exception:
@@ -4514,8 +4455,8 @@ class VRCHubApp(tk.Tk):
                 try:
                     urllib.request.urlretrieve(FT_MODEL_URL, model_path)
                 except Exception as e:
-                    self.after(0, lambda: self.status(
-                        "Model download failed: %s" % e.__class__.__name__))
+                    self.after(0, lambda ex=e: self.status(
+                        "Model download failed: %s" % ex.__class__.__name__))
                     return
 
             cap = cv2.VideoCapture(int(float(self.ft_cam.get() or 0)))
@@ -4694,8 +4635,8 @@ class VRCHubApp(tk.Tk):
                     self.after(0, lambda m=mbps: self.status(
                         "Net: %s Mbps" % m))
                 except Exception as e:
-                    self.after(0, lambda: self.status(
-                        "Net test: %s" % e.__class__.__name__))
+                    self.after(0, lambda ex=e: self.status(
+                        "Net test: %s" % ex.__class__.__name__))
                 for _ in range(900):
                     if not self.net_on.get():
                         return
@@ -4778,8 +4719,8 @@ class VRCHubApp(tk.Tk):
                     out = r.read().decode("utf-8", "replace")[:60]
                 self.after(0, lambda o=out: self.status("PiShock: %s" % o))
             except Exception as e:
-                self.after(0, lambda: self.status(
-                    "PiShock: %s" % str(e)[:60]))
+                self.after(0, lambda ex=e: self.status(
+                    "PiShock: %s" % str(ex)[:60]))
         threading.Thread(target=work, daemon=True).start()
 
     def _dashboard(self):
@@ -4879,7 +4820,7 @@ class VRCHubApp(tk.Tk):
                                                          o))
                 self.after(0, lambda: self.status("%s done." % label))
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:70]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:70]))
         threading.Thread(target=work, daemon=True).start()
         self.status("%s..." % label)
 
@@ -4904,7 +4845,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d user(s)." % len(users))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:70]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:70]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Searching users...")
 
@@ -4975,7 +4916,7 @@ class VRCHubApp(tk.Tk):
                     self.status("%d favorite(s)." % len(favs))
                 self.after(0, fill)
             except Exception as e:
-                self.after(0, lambda: self.status(str(e)[:70]))
+                self.after(0, lambda ex=e: self.status(str(ex)[:70]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Loading favorites...")
 
@@ -5040,8 +4981,8 @@ class VRCHubApp(tk.Tk):
                     self.after(0, lambda l=line: self.osc.chatbox(l))
                     self.after(0, lambda l=line: self.status(l))
                 except Exception as e:
-                    self.after(0, lambda: self.status(
-                        "Weather: %s" % e.__class__.__name__))
+                    self.after(0, lambda ex=e: self.status(
+                        "Weather: %s" % ex.__class__.__name__))
                 for _ in range(600):
                     if not self.wx_on.get():
                         return
@@ -5071,7 +5012,7 @@ class VRCHubApp(tk.Tk):
                 out = fn(*a)
                 self.after(0, lambda: self._vrcn_log(str(out)[:400]))
             except Exception as e:
-                self.after(0, lambda: self._vrcn_log("ERR: %s" % str(e)[:150]))
+                self.after(0, lambda ex=e: self._vrcn_log("ERR: %s" % str(ex)[:150]))
         threading.Thread(target=work, daemon=True).start()
 
     def _vrcn_log(self, msg):
