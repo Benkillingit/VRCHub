@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.2.0"
+APP_VERSION = "4.3.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -1117,7 +1117,7 @@ class VRCHubApp(tk.Tk):
         login = ttk.LabelFrame(f, text="Login (saved to vrchub_config.json as a "
                                       "session cookie)", padding=6)
         login.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        ttk.Label(login, text="User:").grid(row=0, column=0)
+        ttk.Label(login, text="Email or username:").grid(row=0, column=0)
         self.vrc_user = ttk.Entry(login, width=22)
         self.vrc_user.grid(row=0, column=1, padx=4)
         ttk.Label(login, text="Pass:").grid(row=0, column=2)
@@ -1199,12 +1199,84 @@ class VRCHubApp(tk.Tk):
                    command=self._save_memo).pack(side="left")
         self.av_wear = ttk.Label(av, text="Wear time: select an avatar")
         self.av_wear.pack(anchor="w", pady=(2, 0))
+        sa = ttk.LabelFrame(av, text="Saved avatars (local vault, unlimited "
+                            "- no VRChat favorite slots used)", padding=6)
+        sa.pack(fill="x", pady=(8, 0))
+        self.saved_av_list = tk.Listbox(sa, height=4)
+        self.saved_av_list.pack(fill="x")
+        brow = ttk.Frame(sa)
+        brow.pack(fill="x", pady=2)
+        ttk.Button(brow, text="Save selected", width=13,
+                   command=self._save_avatar_local).pack(side="left")
+        ttk.Button(brow, text="Equip saved", width=12,
+                   command=self._equip_saved).pack(side="left", padx=4)
+        ttk.Button(brow, text="Delete", width=8,
+                   command=self._del_saved).pack(side="left")
+        ttk.Label(brow, text="(tip: type/paste an avtr_... id in the search "
+                             "box and Save to add manually; equip works "
+                             "even logged out, via OSC)"
+                  ).pack(side="left", padx=6)
         self.avatar_tree.bind("<<TreeviewSelect>>",
                               lambda e: self._avatar_selected())
 
         f.columnconfigure(0, weight=1)
         f.columnconfigure(1, weight=1)
         f.rowconfigure(1, weight=1)
+        self._fill_saved_avatars()
+
+    def _fill_saved_avatars(self):
+        self.saved_av_list.delete(0, "end")
+        for a in self.cfg.get("saved_avatars", []):
+            self.saved_av_list.insert(
+                "end", "%s  (%s...)" % (a.get("name", "?"),
+                                        a.get("id", "")[13:23]))
+
+    def _save_avatar_local(self):
+        saved = self.cfg.setdefault("saved_avatars", [])
+        sel = self.avatar_tree.selection()
+        if sel:
+            av_id = sel[0]
+            name = self.avatar_tree.item(av_id, "values")[0]
+        else:
+            manual = self.av_search.get().strip()
+            if manual.startswith("avtr_"):
+                av_id, name = manual, "manual entry"
+            else:
+                self.status("Select an avatar (or paste an avtr_ id in "
+                            "search box).")
+                return
+        if any(s.get("id") == av_id for s in saved):
+            self.status("Already in saved avatars.")
+            return
+        saved.append({"id": av_id, "name": name})
+        save_config(self.cfg)
+        self._fill_saved_avatars()
+        self.status("Saved to local vault (%d total)." % len(saved))
+
+    def _equip_saved(self):
+        sel = self.saved_av_list.curselection()
+        if not sel:
+            self.status("Pick a saved avatar first.")
+            return
+        saved = self.cfg.get("saved_avatars", [])
+        idx = sel[0]
+        if idx >= len(saved):
+            return
+        av = saved[idx]
+        self.osc.send("/avatar/change", av["id"])
+        self.status("Equipping '%s' via OSC (be in a world)." % av["name"])
+
+    def _del_saved(self):
+        sel = self.saved_av_list.curselection()
+        if not sel:
+            self.status("Pick a saved avatar to delete.")
+            return
+        saved = self.cfg.get("saved_avatars", [])
+        if sel[0] < len(saved):
+            del saved[sel[0]]
+            save_config(self.cfg)
+            self._fill_saved_avatars()
+            self.status("Removed (%d left)." % len(saved))
 
     def _try_session(self):
         cookies = self.cfg.get("vrchat_cookies", {})
