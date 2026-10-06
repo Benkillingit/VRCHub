@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=VRCHub
-AppVersion=6.4.2
+AppVersion=6.5.1
 AppPublisher=Ben Heck
 DefaultDirName={autopf}\VRCHub
 DefaultGroupName=VRCHub
@@ -14,14 +14,16 @@ Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
 WizardStyle=modern
-UninstallDisplayIcon={app}\VRCHub.exe
+UninstallDisplayIcon={app}\VRCHub.ico
+SetupIconFile=VRCHub.ico
 
 [Files]
 Source: "dist\VRCHub.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "VRCHub.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\VRCHub"; Filename: "{app}\VRCHub.exe"
-Name: "{group}\VRCHub"; Filename: "{app}\VRCHub.exe"
+Name: "{autodesktop}\VRCHub"; Filename: "{app}\VRCHub.exe"; IconFilename: "{app}\VRCHub.ico"
+Name: "{group}\VRCHub"; Filename: "{app}\VRCHub.exe"; IconFilename: "{app}\VRCHub.ico"
 Name: "{group}\Uninstall VRCHub"; Filename: "{uninstallexe}"
 
 [Run]
