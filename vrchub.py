@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VRCHub 2.0 — one app for your VRChat toolkit.
+VRCHub 2.1 — one app for your VRChat toolkit.
 Single-file, stdlib-only Python. Windows-focused, works on Linux/macOS.
 
 Feature union of VRCX + VRCNext + VRC-NEXUS + VRCOSC + MagicChatbox:
@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -312,21 +312,34 @@ class TwitchIRC:
 # ================================================================ WebSocket (HypeRate)
 
 class WSClient:
-    """Tiny masked-frame WebSocket client over TLS (stdlib only)."""
+    """Tiny masked-frame WebSocket client (ws:// and wss://, stdlib only)."""
 
     def __init__(self, url):
-        m = re.match(r"wss://([^/]+)(/.*)?$", url)
-        self.host, self.path = m.group(1), (m.group(2) or "/")
+        m = re.match(r"wss?://([^/]+)(/.*)?$", url)
+        self.secure = url.startswith("wss")
+        hostport = m.group(1)
+        if ":" in hostport and not hostport.startswith("["):
+            self.host, self.port = hostport.rsplit(":", 1)
+            self.port = int(self.port)
+        else:
+            self.host, self.port = hostport, (443 if self.secure else 80)
+        self.path = m.group(2) or "/"
         self.sock = None
 
     def connect(self):
-        raw = socket.create_connection((self.host, 443), timeout=15)
-        ctx = ssl.create_default_context()
-        self.sock = ctx.wrap_socket(raw, server_hostname=self.host)
+        raw = socket.create_connection((self.host, self.port), timeout=15)
+        if self.secure:
+            ctx = ssl.create_default_context()
+            self.sock = ctx.wrap_socket(raw, server_hostname=self.host)
+        else:
+            self.sock = raw
         key = base64.b64encode(os.urandom(16)).decode()
+        hosthdr = self.host if ((self.secure and self.port == 443) or
+                                (not self.secure and self.port == 80)) \
+            else "%s:%d" % (self.host, self.port)
         req = ("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\n"
                "Connection: Upgrade\r\nSec-WebSocket-Key: %s\r\n"
-               "Sec-WebSocket-Version: 13\r\n\r\n" % (self.path, self.host, key))
+               "Sec-WebSocket-Version: 13\r\n\r\n" % (self.path, hosthdr, key))
         self.sock.sendall(req.encode("utf-8"))
         resp = b""
         while b"\r\n\r\n" not in resp:
@@ -393,6 +406,106 @@ class WSClient:
             self.sock.close()
         except OSError:
             pass
+
+
+# ================================================================ OSC listener
+
+class OSCDecoder:
+    """Decode an OSC 1.0 packet into (address, [args])."""
+
+    @staticmethod
+    def decode(data):
+        # address
+        end = data.index(b"\x00")
+        address = data[:end].decode("utf-8", "replace")
+        rest = data[end + 1:]
+        # skip padding to 4
+        rest = rest[(4 - len(data[:end + 1]) % 4) % 4:]
+        # typetags
+        if not rest or rest[:1] != b",":
+            return address, []
+        t_end = rest.index(b"\x00")
+        tags = rest[1:t_end].decode("ascii", "replace")
+        body = rest[t_end + 1:]
+        body = body[(4 - (t_end + 1) % 4) % 4:]
+        args = []
+        for t in tags:
+            if t == "i":
+                args.append(struct.unpack(">i", body[:4])[0]); body = body[4:]
+            elif t == "f":
+                args.append(struct.unpack(">f", body[:4])[0]); body = body[4:]
+            elif t == "s":
+                s_end = body.index(b"\x00")
+                args.append(body[:s_end].decode("utf-8", "replace"))
+                taken = s_end + 1
+                body = body[taken + ((4 - taken % 4) % 4):]
+            elif t == "T":
+                args.append(True)
+            elif t == "F":
+                args.append(False)
+        return address, args
+
+
+class OSCListener:
+    """UDP listener for outbound OSC events from VRChat / VRCX / VRCOSC / MCB."""
+
+    def __init__(self, host="127.0.0.1", port=9001, on_event=None):
+        self.host, self.port = host, port
+        self.on_event = on_event or (lambda addr, args: None)
+        self.sock = None
+        self.running = False
+
+    def start(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((self.host, self.port))
+        self.sock.settimeout(1)
+        self.running = True
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        while self.running:
+            try:
+                data, addr = self.sock.recvfrom(2048)
+                address, args = OSCDecoder.decode(data)
+                self.on_event(address, args)
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+
+    def stop(self):
+        self.running = False
+        try:
+            if self.sock:
+                self.sock.close()
+        except OSError:
+            pass
+
+
+def check_port(host, port, timeout=1.0):
+    """Is something listening on this local port? (app detection)"""
+    try:
+        s = socket.create_connection((host, port), timeout=timeout)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def running_processes():
+    """Names of running processes (Windows: tasklist, else ps)."""
+    try:
+        if sys.platform == "win32":
+            out = subprocess.check_output(
+                ["tasklist", "/FO", "CSV"], stderr=subprocess.DEVNULL,
+                text=True, timeout=10)
+            return [line.split('","')[0].strip('"').lower()
+                    for line in out.splitlines()[1:] if line.strip()]
+        out = subprocess.check_output(["ps", "-e"], text=True, timeout=10)
+        return [l.split()[3].lower() for l in out.splitlines()[1:] if len(l.split()) > 3]
+    except Exception:
+        return []
 
 
 HYPHERATE_WS = "wss://app.hypereact.com/ws"
@@ -551,6 +664,10 @@ class VRCHubApp(tk.Tk):
         self.twitch = None
         self.hr_ws = None
         self.hr_running = False
+        self.vrcx_ws = None
+        self.vrcx_running = False
+        self.osc_listener = None
+        self.osc_listening = False
         self.cycle_running = False
         self.media_running = False
         self._loop_running = False
@@ -582,6 +699,7 @@ class VRCHubApp(tk.Tk):
         self._tab_api(nb)
         self._tab_params(nb)
         self._tab_media(nb)
+        self._tab_connect(nb)
         self._tab_tools(nb)
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
@@ -1144,6 +1262,197 @@ class VRCHubApp(tk.Tk):
 
         threading.Thread(target=run, daemon=True).start()
         self.status("Connecting to HypeRate...")
+
+# ---- Connections tab (talk to the other apps)
+
+    def _tab_connect(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Connections  ")
+
+        det = ttk.LabelFrame(f, text="App detection", padding=6)
+        det.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.det_label = ttk.Label(det, text="Hit Scan to see which apps are running.")
+        self.det_label.pack(side="left", fill="x", expand=True)
+        ttk.Button(det, text="Scan", command=self._detect_apps).pack(side="left")
+
+        # VRCX websocket (VRCX Settings -> WebSocket Server, default port 9739)
+        vx = ttk.LabelFrame(f, text="VRCX WebSocket (enable in VRCX: Settings → "
+                                    "WebSocket Server)", padding=6)
+        vx.grid(row=1, column=0, sticky="ew", pady=4)
+        ttk.Label(vx, text="Host:").grid(row=0, column=0)
+        self.vrcx_host = ttk.Entry(vx, width=14)
+        self.vrcx_host.insert(0, "127.0.0.1")
+        self.vrcx_host.grid(row=0, column=1, padx=4)
+        ttk.Label(vx, text="Port:").grid(row=0, column=2)
+        self.vrcx_port = ttk.Entry(vx, width=6)
+        self.vrcx_port.insert(0, "9739")
+        self.vrcx_port.grid(row=0, column=3, padx=4)
+        ttk.Label(vx, text="Token:").grid(row=0, column=4)
+        self.vrcx_token = ttk.Entry(vx, width=14)
+        self.vrcx_token.grid(row=0, column=5, padx=4)
+        self.vrcx_btn = ttk.Button(vx, text="Connect", command=self._toggle_vrcx)
+        self.vrcx_btn.grid(row=0, column=6, padx=4)
+        self.vrcx_relay = tk.BooleanVar(value=True)
+        ttk.Checkbutton(vx, text="Announce friend joins/leaves in chatbox",
+                        variable=self.vrcx_relay).grid(row=1, column=0,
+                                                       columnspan=7,
+                                                       sticky="w", pady=2)
+        self.vrcx_log = scrolledtext.ScrolledText(vx, height=8, state="disabled",
+                                                  font=("Consolas", 9),
+                                                  wrap="word")
+        self.vrcx_log.grid(row=2, column=0, columnspan=7, sticky="ew", pady=4)
+
+        # OSC listener (the shared wire between all five apps)
+        ol = ttk.LabelFrame(f, text="OSC listener — live traffic between VRChat "
+                                     "and your apps (VRCX uses 9001)", padding=6)
+        ol.grid(row=2, column=0, sticky="ew", pady=4)
+        ttk.Label(ol, text="Port:").grid(row=0, column=0)
+        self.osc_port = ttk.Entry(ol, width=6)
+        self.osc_port.insert(0, "9001")
+        self.osc_port.grid(row=0, column=1, padx=4)
+        self.osc_btn = ttk.Button(ol, text="Listen", command=self._toggle_osc_listener)
+        self.osc_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(ol, text="(chatbox/params events typed via VRCX, VRCOSC or "
+                            "MagicChatbox show up here)").grid(
+            row=0, column=3, sticky="w", padx=8)
+        self.osc_log = scrolledtext.ScrolledText(ol, height=8, state="disabled",
+                                                 font=("Consolas", 9), wrap="word")
+        self.osc_log.grid(row=1, column=0, columnspan=4, sticky="ew", pady=4)
+        f.columnconfigure(0, weight=1)
+        vx.columnconfigure(0, weight=1)
+        ol.columnconfigure(0, weight=1)
+
+    def _detect_apps(self):
+        procs = running_processes()
+        ports = {"VRCX websocket (9739)": 9739}
+        lines = []
+        for label, exe, hints in [
+                ("VRCX", "vrcx.exe", ("vrcx",)),
+                ("VRCOSC", "vrcosc.exe", ("vrcosc",)),
+                ("MagicChatbox", "magicchatbox.exe", ("magicchatbox",)),
+                ("VRChat", "vrchat.exe", ("vrchat",))]:
+            found = any(h in p for p in procs for h in hints)
+            lines.append("%s: %s" % (label, "RUNNING" if found else "not running"))
+        for label, port in ports.items():
+            lines.append("%s: %s" % (label,
+                                     "OPEN" if check_port("127.0.0.1", port)
+                                     else "closed"))
+        self.det_label.config(text="  |  ".join(lines))
+        self.status("Scan done (%d processes)." % len(procs))
+
+    def _log_to(self, widget, text):
+        widget.config(state="normal")
+        widget.insert("end", text + "\n")
+        widget.see("end")
+        widget.config(state="disabled")
+
+    def _toggle_vrcx(self):
+        if self.vrcx_running:
+            self.vrcx_running = False
+            if self.vrcx_ws:
+                self.vrcx_ws.close()
+            self.vrcx_btn.config(text="Connect")
+            self.status("VRCX link off.")
+            return
+        host = self.vrcx_host.get().strip() or "127.0.0.1"
+        try:
+            port = int(self.vrcx_port.get())
+        except ValueError:
+            port = 9739
+        token = self.vrcx_token.get().strip()
+
+        def run():
+            self.vrcx_running = True
+            self.vrcx_btn.config(text="Disconnect")
+            base = "ws://%s:%d" % (host, port)
+            paths = ["/ws", "/", "/?token=%s" % token, "/ws?token=%s" % token]
+            while self.vrcx_running:
+                ws, last_err = None, None
+                for path in paths:
+                    try:
+                        w = WSClient(base + path)
+                        w.connect()
+                        if token:
+                            # best-effort auth message for token-based builds
+                            w.send(json.dumps(
+                                {"type": "auth", "json": {"token": token}}))
+                        ws = w
+                        break
+                    except OSError as e:
+                        last_err = e
+                if not ws:
+                    if self.vrcx_running:
+                        self.after(0, lambda: self._log_to(
+                            self.vrcx_log, "Connect failed on %s (%s) — retrying "
+                            "in 5s. Is VRCX running with WebSocket Server on?"
+                            % (base, last_err.__class__.__name__)))
+                    time.sleep(5)
+                    continue
+                self.after(0, lambda: self._log_to(
+                    self.vrcx_log, "Connected %s" % ws.path))
+                self.vrcx_ws = ws
+                try:
+                    while self.vrcx_running:
+                        msg = ws.recv(timeout=15)
+                        if not msg:
+                            continue
+                        self._vrcx_event(msg)
+                except Exception:
+                    pass
+                ws.close()
+                if self.vrcx_running:
+                    time.sleep(3)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Connecting to VRCX...")
+
+    def _vrcx_event(self, msg):
+        def show():
+            try:
+                d = json.loads(msg)
+            except ValueError:
+                self._log_to(self.vrcx_log, msg[:200])
+                return
+            etype = d.get("type", "")
+            j = d.get("json", {})
+            # VRCX pushes events; friend-join style events carry user names
+            text = (j.get("user") or {}).get("displayName", "")
+            line = "%s %s" % (etype, text or json.dumps(d)[:120])
+            self._log_to(self.vrcx_log, line)
+            if (self.vrcx_relay.get() and text and
+                    any(k in etype.lower() for k in
+                        ("join", "left", "notif", "location"))):
+                if "left" in etype.lower():
+                    self.osc.chatbox("%s left" % text, notify=True)
+                else:
+                    self.osc.chatbox("%s joined" % text, notify=True)
+        self.after(0, show)
+
+    def _toggle_osc_listener(self):
+        if self.osc_listening:
+            self.osc_listener.stop()
+            self.osc_listening = False
+            self.osc_btn.config(text="Listen")
+            self.status("OSC listener off.")
+            return
+        try:
+            port = int(self.osc_port.get())
+        except ValueError:
+            port = 9001
+
+        def on_event(addr, args):
+            def show():
+                self._log_to(self.osc_log, "%s %s" % (addr, args))
+            self.after(0, show)
+
+        try:
+            self.osc_listener = OSCListener("127.0.0.1", port, on_event=on_event)
+            self.osc_listener.start()
+            self.osc_listening = True
+            self.osc_btn.config(text="Stop")
+            self.status("Listening on UDP %d." % port)
+        except OSError as e:
+            self.status("Port %d busy: %s" % (port, e))
 
     # ---- Launcher tab (VRCNext)
 
