@@ -97,6 +97,15 @@ VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel 
 - **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
 - **Delete** — removes it from your vault only.
 
+### Search ALL sources (4.5)
+The **Search ALL sources** button runs one query across every avatar database VRCHub can legitimately reach:
+1. **VRChat's public avatar database** (the official one) — now sorted by popularity, 60 results
+2. **Your own avatars**
+3. **Your local vault**
+4. **Your cloud vault** (GitHub database)
+
+Results are merged by avatar ID with a source summary in the status bar. Note: "avatar database" websites that host ripped avatar files are not searched, on purpose — that content is uploaded without creator permission, and wiring those in would put your account at risk. VRChat's own API is the authoritative database and it's fully covered here.
+
 ### Cloud vault sync (4.4)
 The vault is now a real database in the cloud, not just a local file:
 - **Create repo** — makes a *private* `vrchub-data` repo under your GitHub account (or point the field at any repo you own).
