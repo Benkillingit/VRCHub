@@ -17,6 +17,13 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 3.0** | |
+| World search + live instances + join via launch link | VRCX |
+| Notifications feed (+ accept/hide) | VRCX |
+| Favorite avatars list with equip | VRCX |
+| AFK detection — auto 'AFK' / 'I'm back!' in chatbox | VRCOSC |
+| Chatbox stopwatch, random gesture cycler | VRCOSC |
+| System status — battery + RAM in chatbox | VRCNext |
 | **Connections tab (NEW in 2.1)** | |
 | Connect to VRCX via its WebSocket server (live events, friend join/leave announces in chatbox) | VRCX |
 | OSC listener — see the live wire traffic between VRChat and all your apps (VRCX/VRCOSC/MCB all speak OSC) | all five |
