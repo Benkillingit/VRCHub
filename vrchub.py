@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.5.0"
+APP_VERSION = "4.6.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -1761,7 +1761,11 @@ class VRCHubApp(tk.Tk):
                             ("Drop R", "/input/DropRight"),
                             ("Grab R", "/input/GrabRight"),
                             ("Use R", "/input/UseRight"),
-                            ("Panic!", "/input/PanicButton")]
+                            ("Panic!", "/input/PanicButton"),
+                            ("Spin L/R", "/input/SpinHoldLR"),
+                            ("Spin U/D", "/input/SpinHoldUD"),
+                            ("Spin CW", "/input/SpinHoldCwCcw"),
+                            ("QuickMenu", "/input/QuickMenuToggleRight")]
         for i, (label, path) in enumerate(self._input_taps):
             ttk.Button(ic, text=label, width=11,
                        command=lambda p=path, l=label:
@@ -2308,8 +2312,11 @@ class VRCHubApp(tk.Tk):
         ttk.Label(ck, text="- time in chatbox, refreshed live").grid(
             row=0, column=3, padx=8)
 
+        ttk.Button(f, text="Open desktop overlay",
+                   command=self._open_overlay).grid(row=4, column=0,
+                                                    sticky="w", pady=3)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
-        cd.grid(row=5, column=0, sticky="ew", pady=3, columnspan=1)
+        cd.grid(row=6, column=0, sticky="ew", pady=3, columnspan=1)
         ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
         self.cd_mins = ttk.Spinbox(cd, from_=1, to=180, width=5, value=5)
         self.cd_mins.grid(row=0, column=1, padx=4)
@@ -2323,7 +2330,7 @@ class VRCHubApp(tk.Tk):
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=8, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -2387,6 +2394,62 @@ class VRCHubApp(tk.Tk):
 
         threading.Thread(target=run, daemon=True).start()
         self.status("Clock on (%ds)." % secs)
+
+    def _open_overlay(self):
+        """Tiny always-on-top overlay: clock, status, quick chatbox send.
+        Drag to move, right-click to close. Desktop-mode companion;
+        works while VRChat runs (monitor or VR - same network)."""
+        if getattr(self, "ov_win", None) and self.ov_win.winfo_exists():
+            self.ov_win.lift()
+            return
+        ov = tk.Toplevel(self)
+        self.ov_win = ov
+        ov.title("VRCHub overlay")
+        ov.overrideredirect(True)
+        try:
+            ov.attributes("-topmost", True)
+            ov.attributes("-alpha", 0.85)
+        except tk.TclError:
+            pass
+        ov.configure(bg="#111")
+
+        def start_drag(e):
+            ov._sx, ov._sy = e.x, e.y
+
+        def drag(e):
+            ov.geometry("+%d+%d" % (ov.winfo_x() + e.x - ov._sx,
+                                   ov.winfo_y() + e.y - ov._sy))
+        for w in (ov,):
+            w.bind("<Button-1>", start_drag)
+            w.bind("<B1-Motion>", drag)
+        ov.bind("<Button-3>", lambda e: ov.destroy())
+
+        self.ov_clock = tk.Label(ov, text="", font=("Segoe UI", 14),
+                                  fg="#0ff", bg="#111")
+        self.ov_clock.pack(padx=14, pady=(8, 0))
+        self.ov_stat = tk.Label(ov, text="ready", font=("Segoe UI", 9),
+                                fg="#aaa", bg="#111", wraplength=240)
+        self.ov_stat.pack(padx=14)
+        self.ov_entry = ttk.Entry(ov, width=26)
+        self.ov_entry.pack(padx=10, pady=(4, 4))
+
+        def send(e=None):
+            t = self.ov_entry.get().strip()
+            if t:
+                self.osc.chatbox(t)
+                self.ov_entry.delete(0, "end")
+                self.ov_stat.config(text="sent: %s" % t[:28])
+        self.ov_entry.bind("<Return>", send)
+
+        def tick():
+            if not (getattr(self, "ov_win", None)
+                    and self.ov_win.winfo_exists()):
+                return
+            self.ov_clock.config(text=time.strftime("%H:%M:%S"))
+            self.after(1000, tick)
+        ov.geometry("+%d+%d" % (self.winfo_screenwidth() - 320, 60))
+        tick()
+        self.status("Overlay open (drag = move, right-click = close).")
 
     def _toggle_countdown(self):
         if self.cd_running:
