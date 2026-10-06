@@ -91,6 +91,13 @@ Talk to an AI assistant; its replies can be relayed straight into your VRChat ch
 
 Note: AFK counts VRCHub-side activity (messages you send from this app), not keyboard/mouse input.
 
+### Face Track (4.1, experimental)
+- **What it does**: reads your webcam with MediaPipe, estimates face blendshapes, and sends them to VRChat as face-tracking parameters (`v2/EyeBlink*`, `v2/JawOpen`, `v2/MouthSmile*`, brows, squints).
+- **Setup (once)**: `pip install opencv-python mediapipe`. The ~3.7 MB face model downloads automatically on first run.
+- **Use with a face-tracking-enabled avatar.** Desktop webcam quality won't match a dedicated tracker; VRCFT (the dedicated app) remains the gold standard — this is the zero-extra-hardware path.
+- Everything else in VRCHub still runs without these dependencies installed; the tab just says what's missing.
+- **Stop** before unplugging the camera; Start again with a different camera index if needed.
+
 ### Connections (2.1+)
 - **App detection** — Scan lists which of VRChat/VRCX/VRCOSC/MagicChatbox are running and whether VRCX's port is open.
 - **VRCX WebSocket** — enable VRCX → Settings → WebSocket Server (port 9739), set a token, connect here. You see VRCX's live event stream; friend joins/leaves can be auto-announced in your chatbox. (Protocol verified best-effort; the log shows whatever VRCX sends.)
