@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.8** | |
+| Dynamic UI toggle — whole window tints to the game's screen color (dark blend, easy on eyes) | user request |
 | **NEW in 4.7** | |
 | Screen light sync (Ambilight) — room bulb color matches the game screen; works with Tuya-based Geeni bulbs | user request |
 | **NEW in 4.6** | |
