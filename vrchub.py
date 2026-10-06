@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.3.0"
+APP_VERSION = "6.4.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -486,6 +486,37 @@ class VRChatAPI:
             action, "/auth/user/mute/%s" % urllib.parse.quote(user_id))
         if status not in (200, 201, 204):
             raise RuntimeError("Mute failed: " + text[:120])
+
+    def search_users(self, query):
+        st, text = self._request("GET", "/users?search=%s&n=20"
+                                 % urllib.parse.quote(query))
+        return self._json(text) or []
+
+    def user_profile(self, user_id):
+        st, text = self._request("GET", "/users/%s" % user_id)
+        return self._json(text) or {}
+
+    def add_favorite(self, type_, obj_id):
+        st, text = self._request("POST", "/favorites",
+                                 {"type": type_, "id": obj_id,
+                                  "tags": type_ + "s"})
+        return self._json(text) or {}
+
+    def list_favorites(self, tag, n=50):
+        st, text = self._request("GET", "/favorites?tag=%s&n=%d"
+                                 % (tag, n))
+        return self._json(text) or []
+
+    def remove_favorite(self, fav_id):
+        self._request("DELETE", "/favorites/%s" % fav_id)
+
+    def quests(self):
+        st, text = self._request("GET", "/auth/user/quests")
+        return self._json(text) or []
+
+    def subscriptions(self):
+        st, text = self._request("GET", "/auth/user/subscriptions")
+        return self._json(text) or []
 
     def avatar_favorites(self, limit=30):
         """Favorite avatars with names (VRCX favorite bar)."""
@@ -1148,6 +1179,7 @@ class VRCHubApp(tk.Tk):
         self._tab_connect(nb)
         self._tab_plugins(nb)
         self._tab_tools(nb)
+        self._tab_webapi(nb)
         self._tab_face(nb)
         self._tab_help(nb)
         self._tab_vrcn(nb)
@@ -4753,6 +4785,205 @@ class VRCHubApp(tk.Tk):
             out.append("%s [%d]: %s" % (w[-14:], len(names),
                                         ", ".join(names[:6])))
         return " || ".join(out[:6])
+
+    # ---- Web API tab: full VRChat web API surface
+
+    def _tab_webapi(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Web API  ")
+
+        us = ttk.LabelFrame(f, text="User search (all VRChat users)",
+                            padding=6)
+        us.pack(fill="x")
+        ttk.Label(us, text="Name:").pack(side="left")
+        self.user_search = ttk.Entry(us, width=16)
+        self.user_search.pack(side="left", padx=4)
+        ttk.Button(us, text="Search users",
+                   command=self._user_search).pack(side="left", padx=4)
+        cols = ("name", "status", "id")
+        self.user_tree = ttk.Treeview(us, columns=cols, show="headings",
+                                      height=6)
+        for c, w in zip(cols, (150, 90, 120)):
+            self.user_tree.heading(c, text=c.capitalize())
+            self.user_tree.column(c, width=w)
+        self.user_tree.pack(fill="x")
+        ub = ttk.Frame(us)
+        ub.pack(fill="x")
+        for label, cmd in (("Profile", self._user_profile),
+                            ("Add friend", self._user_friend_add),
+                            ("Block", self._user_block)):
+            ttk.Button(ub, text=label, command=cmd).pack(side="left",
+                                                          padx=3)
+        self.umsg = ttk.Entry(ub, width=24)
+        self.umsg.pack(side="left", padx=6)
+        ttk.Button(ub, text="Message user",
+                   command=self._user_msg).pack(side="left", padx=3)
+
+        fv = ttk.LabelFrame(f, text="Favorites management", padding=6)
+        fv.pack(fill="x", pady=6)
+        self.fav_tag = ttk.Combobox(fv, values=("avatar", "world",
+                                                 "friend"), width=7,
+                                    state="readonly")
+        self.fav_tag.set("avatar")
+        self.fav_tag.pack(side="left")
+        ttk.Label(fv, text="ID:").pack(side="left")
+        self.fav_id = ttk.Entry(fv, width=26)
+        self.fav_id.pack(side="left", padx=3)
+        ttk.Button(fv, text="Add favorite",
+                   command=self._fav_add).pack(side="left", padx=3)
+        ttk.Button(fv, text="List favorites",
+                   command=self._fav_list).pack(side="left", padx=3)
+        ttk.Button(fv, text="Remove favorite",
+                   command=self._fav_del).pack(side="left", padx=3)
+        cols = ("fav id", "object id", "type")
+        self.fav_tree = ttk.Treeview(fv, columns=cols, show="headings",
+                                     height=5)
+        for c, w in zip(cols, (170, 170, 60)):
+            self.fav_tree.heading(c, text=c.capitalize())
+            self.fav_tree.column(c, width=w)
+        self.fav_tree.pack(fill="x")
+
+        ms = ttk.LabelFrame(f, text="Account", padding=6)
+        ms.pack(fill="x")
+        for label, kind in (("My groups", "groups"),
+                            ("Quests", "quests"),
+                            ("VRC+ status", "subs")):
+            ttk.Button(ms, text=label,
+                       command=lambda k=kind: self._misc_dump(k)).pack(
+                side="left", padx=3)
+
+        self.web_log = scrolledtext.ScrolledText(
+            f, height=7, state="disabled", font=("Consolas", 9),
+            wrap="word")
+        self.web_log.pack(fill="both", expand=True, pady=(6, 0))
+
+    def _web_go(self, fn, label):
+        def work():
+            try:
+                out = fn()
+                if not isinstance(out, str):
+                    out = json.dumps(out, default=str)[:400]
+                self.after(0, lambda o=out: self._log_to(self.web_log,
+                                                         o))
+                self.after(0, lambda: self.status("%s done." % label))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:70]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("%s..." % label)
+
+    def _user_search(self):
+        q = self.user_search.get().strip()
+        if not q:
+            self.status("Type a name to search.")
+            return
+
+        def work():
+            try:
+                users = self.api.search_users(q)
+
+                def fill():
+                    self.user_tree.delete(
+                        *self.user_tree.get_children())
+                    for u in users:
+                        self.user_tree.insert(
+                            "", "end", iid=u["id"],
+                            values=(u.get("displayName", "?"),
+                                    u.get("status", "?"), u["id"]))
+                    self.status("%d user(s)." % len(users))
+                self.after(0, fill)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:70]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Searching users...")
+
+    def _user_sel(self):
+        sel = self.user_tree.selection()
+        return sel[0] if sel else ""
+
+    def _user_profile(self):
+        uid = self._user_sel()
+        if not uid:
+            self.status("Pick a user first.")
+            return
+
+        def work():
+            u = self.api.user_profile(uid)
+            info = "%s (%s)\nBio: %s\nJoined: %s\nLast login: %s" % (
+                u.get("displayName"), u.get("status"),
+                (u.get("bio") or "")[:120], u.get("dateJoined", "?"),
+                u.get("last_login", "?"))
+            self.after(0, lambda i=info: self._log_to(self.web_log, i))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _user_friend_add(self):
+        uid = self._user_sel()
+        if not uid:
+            self.status("Pick a user first.")
+            return
+        self._web_go(lambda: self.api.friend_request(uid), "Friend request")
+
+    def _user_block(self):
+        uid = self._user_sel()
+        if not uid:
+            self.status("Pick a user first.")
+            return
+        self._web_go(lambda: self.api.block_user(uid, True), "Block")
+
+    def _user_msg(self):
+        uid = self._user_sel()
+        msg = self.umsg.get().strip()
+        if not (uid and msg):
+            self.status("Pick a user and type a message.")
+            return
+        self._web_go(lambda: self.api.send_message(uid, msg), "Message sent")
+
+    def _fav_add(self):
+        oid = self.fav_id.get().strip()
+        if not oid:
+            self.status("Paste an avatar/world/friend ID first.")
+            return
+        t = self.fav_tag.get()
+        self._web_go(lambda: self.api.add_favorite(t, oid),
+                     "Favorite added")
+
+    def _fav_list(self):
+        t = self.fav_tag.get()
+
+        def work():
+            try:
+                favs = self.api.list_favorites(t + "s")
+
+                def fill():
+                    self.fav_tree.delete(*self.fav_tree.get_children())
+                    for fv in favs:
+                        self.fav_tree.insert(
+                            "", "end", iid=fv["id"],
+                            values=(fv["id"], fv.get("favoriteId", ""),
+                                    fv.get("type", "")))
+                    self.status("%d favorite(s)." % len(favs))
+                self.after(0, fill)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:70]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Loading favorites...")
+
+    def _fav_del(self):
+        sel = self.fav_tree.selection()
+        if not sel:
+            self.status("Pick a favorite to remove.")
+            return
+        fid = sel[0]
+        self._web_go(lambda: self.api.remove_favorite(fid),
+                     "Favorite removed")
+        self.after(1500, self._fav_list)
+
+    def _misc_dump(self, kind):
+        if kind == "groups":
+            self._web_go(lambda: self.api.my_groups(), "Groups")
+        elif kind == "quests":
+            self._web_go(lambda: self.api.quests(), "Quests")
+        else:
+            self._web_go(lambda: self.api.subscriptions(), "VRC+")
 
     # ---- weather + clock (MCB/VRCOSC parity)
 
