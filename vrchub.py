@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "3.3.0"
+APP_VERSION = "4.0.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -800,6 +800,40 @@ def ram_usage():
     return None
 
 
+HELP_TEXT = """VRCHUB QUICK START
+==================
+1. Have VRChat running (desktop or VR).
+2. Start this app, go to the Chatbox tab, type, Send. Your words appear
+   above your head in-game. That is OSC (UDP port 9000 by default).
+3. Everything else builds on that: see DOCS.md on GitHub for the full
+   tutorial on every tab, troubleshooting, and how each feature works.
+
+TAB MAP
+-------
+Chatbox - send text, cycle lines, schedule messages
+AI Chat - talk to an AI, replies go to your chatbox
+VRChat API - login (2FA ok), friends, avatars, equip = hot-swap,
+             profiles for multi-account
+Worlds - search worlds, list instances, join, notifications
+Avatar Params - set any parameter by name, gestures
+Media & Chat - Spotify/media in chatbox, Twitch relay, HypeRate,
+               Pulsoid heart rate
+Extras - AFK, stopwatch, countdown, clock, gesture cycler,
+         system status, PiShock
+Connections - VRCX websocket, live OSC listener, app detection
+Launcher - launch VRChat/VRCX/VRCOSC/MagicChatbox
+Help - this page
+
+TROUBLESHOOTING
+---------------
+Nothing appears in-game? In VRChat: Settings > OSC > make sure OSC is
+enabled. Restart VRChat after changing OSC settings.
+Avatar not hot-swapping? Equip needs you to be in a world, not the
+login screen.
+Login failing? VRChat logins with 2FA: use your authenticator app code.
+Full docs: DOCS.md in the GitHub repo.
+"""
+
 GESTURES = ["Neutral", "Fist", "Open", "Point", "Peace", "RockNRoll",
             "Gun", "ThumbsUp"]
 
@@ -834,6 +868,9 @@ class VRCHubApp(tk.Tk):
         self._last_media_title = ""
         self._media_last_sent = None
         self.clock_running = False
+        self.cd_running = False
+        self._msg_queue = []
+        self._queue_thread = None
         self.friend_watch_running = False
         self._friend_states = {}
         self.afk_running = False
@@ -876,6 +913,7 @@ class VRCHubApp(tk.Tk):
         self._tab_extras(nb)
         self._tab_connect(nb)
         self._tab_tools(nb)
+        self._tab_help(nb)
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
         ttk.Label(sb, textvariable=self.status_var, anchor="w",
@@ -914,6 +952,23 @@ class VRCHubApp(tk.Tk):
                        ).grid(row=i // 4, column=i % 4, padx=3, pady=3)
 
         # Nexus-style cycle lines
+        sq = ttk.LabelFrame(f, text="Scheduled messages (send later)",
+                            padding=6)
+        sq.grid(row=99, column=0, columnspan=3, sticky="ew", pady=4)
+        ttk.Label(sq, text="In (min):").grid(row=0, column=0)
+        self.sched_mins = ttk.Spinbox(sq, from_=1, to=1440, width=5,
+                                      value=10)
+        self.sched_mins.grid(row=0, column=1, padx=4)
+        ttk.Label(sq, text="Message:").grid(row=0, column=2)
+        self.sched_text = ttk.Entry(sq)
+        self.sched_text.grid(row=0, column=3, padx=4, sticky="ew")
+        ttk.Button(sq, text="Queue",
+                   command=self._queue_message).grid(row=0, column=4,
+                                                     padx=4)
+        ttk.Label(sq, text="(stays queued until sent; list in status)"
+                  ).grid(row=0, column=5, padx=6)
+        sq.columnconfigure(3, weight=1)
+
         cyc = ttk.LabelFrame(f, text="Cycle lines (VRC-NEXUS style, one per "
                                      "line)", padding=6)
         cyc.grid(row=4, column=0, columnspan=3, sticky="ew")
@@ -1904,11 +1959,22 @@ class VRCHubApp(tk.Tk):
         ttk.Label(ck, text="- time in chatbox, refreshed live").grid(
             row=0, column=3, padx=8)
 
+        cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
+        cd.grid(row=5, column=0, sticky="ew", pady=3, columnspan=1)
+        ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
+        self.cd_mins = ttk.Spinbox(cd, from_=1, to=180, width=5, value=5)
+        self.cd_mins.grid(row=0, column=1, padx=4)
+        self.cd_btn = ttk.Button(cd, text="Start",
+                                 command=self._toggle_countdown)
+        self.cd_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(cd, text="- counts down, then GO!").grid(row=0, column=3,
+                                                          padx=8)
+
         self.extras_log = scrolledtext.ScrolledText(f, height=6,
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=7, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -1972,6 +2038,70 @@ class VRCHubApp(tk.Tk):
 
         threading.Thread(target=run, daemon=True).start()
         self.status("Clock on (%ds)." % secs)
+
+    def _toggle_countdown(self):
+        if self.cd_running:
+            self.cd_running = False
+            self.cd_btn.config(text="Start")
+            self.status("Countdown off.")
+            return
+        try:
+            secs = max(1, int(float(self.cd_mins.get()))) * 60
+        except ValueError:
+            secs = 300
+
+        def run():
+            self.cd_running = True
+            self.cd_btn.config(text="Stop")
+            end = time.time() + secs
+            while self.cd_running:
+                left = int(end - time.time())
+                if left <= 0:
+                    self.osc.chatbox("GO!", notify=True)
+                    break
+                self.osc.chatbox("⏳ %02d:%02d" % (left // 60, left % 60))
+                for _ in range(100):
+                    if not self.cd_running:
+                        return
+                    time.sleep(0.1)
+            self.cd_running = False
+
+            def done():
+                self.cd_btn.config(text="Start")
+                self.status("Countdown finished.")
+            self.after(0, done)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Countdown running.")
+
+    def _queue_message(self):
+        text = self.sched_text.get().strip()
+        if not text:
+            self.status("Type a message to queue.")
+            return
+        try:
+            mins = max(1, int(float(self.sched_mins.get())))
+        except ValueError:
+            mins = 10
+        self._msg_queue.append((time.time() + mins * 60, text))
+        self.sched_text.delete(0, "end")
+        if not self._queue_thread or not self._queue_thread.is_alive():
+            self._queue_thread = threading.Thread(target=self._queue_loop,
+                                                  daemon=True)
+            self._queue_thread.start()
+        self.status("Queued (%d pending)." % len(self._msg_queue))
+
+    def _queue_loop(self):
+        while self._msg_queue:
+            due, text = min(self._msg_queue, key=lambda x: x[0])
+            wait = due - time.time()
+            if wait <= 0:
+                self._msg_queue.remove((due, text))
+                self.osc.chatbox(text)
+                self.after(0, lambda t=text[:30]:
+                           self.status("Scheduled message sent: %s" % t))
+            else:
+                time.sleep(min(wait, 5))
 
     def _toggle_afk(self):
         if self.afk_running:
@@ -2295,6 +2425,16 @@ class VRCHubApp(tk.Tk):
             self.status("Listening on UDP %d." % port)
         except OSError as e:
             self.status("Port %d busy: %s" % (port, e))
+
+    # ---- Help tab (tutorial)
+
+    def _tab_help(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Help  ")
+        txt = scrolledtext.ScrolledText(f, wrap="word", font=("Segoe UI", 10))
+        txt.pack(fill="both", expand=True)
+        txt.insert("end", HELP_TEXT)
+        txt.config(state="disabled")
 
     # ---- Launcher tab (VRCNext)
 
