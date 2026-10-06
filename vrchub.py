@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.2.0"
+APP_VERSION = "6.3.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -4607,6 +4607,25 @@ class VRCHubApp(tk.Tk):
         self._fill_saved_avatars()
         self.status("Imported %d section(s)." % len(data))
 
+    def _osc_input(self, name, val):
+        self.osc.send("/input/" + name, float(val))
+
+    def _osc_tap(self, addr):
+        """Tap-style input: on for 150ms then off."""
+        m = {"NOD": "/tracking/Head/Nod", "SHAKE": "/tracking/Head/Shake"}
+        a = m.get(addr, "/input/" + addr)
+        self.osc.send(a, 1)
+        self.after(150, lambda: self.osc.send(a, 0))
+
+    def _osc_midi(self, note, on):
+        try:
+            ch = int(self.midi_ch.get())
+            vel = int(self.midi_vel.get())
+        except ValueError:
+            return
+        self.osc.send("/midi/%d/note/%d" % (ch, note),
+                      vel if on else 0)
+
     def _net_toggle(self):
         if self.net_on.get():
             self.net_on.set(False)
@@ -5097,6 +5116,71 @@ class VRCHubApp(tk.Tk):
                                     "needs your PiShock username, API key "
                                     "and share code)", padding=6)
         ps.grid(row=19, column=0, sticky="ew", pady=3)
+        io = ttk.LabelFrame(f, text="OSC input control (drive VRChat from "
+                                     "VRCHub - needs OSC enabled)",
+                            padding=6)
+        io.grid(row=20, column=0, sticky="ew", pady=3)
+        ttk.Label(io, text="MoveX:").pack(side="left")
+        self.in_mx = tk.Scale(io, from_=-1, to=1, resolution=0.25,
+                              orient="horizontal", length=90,
+                              command=lambda v: self._osc_input(
+                                  "MoveX", float(v)))
+        self.in_mx.pack(side="left")
+        ttk.Label(io, text="MoveY:").pack(side="left")
+        self.in_my = tk.Scale(io, from_=-1, to=1, resolution=0.25,
+                              orient="horizontal", length=90,
+                              command=lambda v: self._osc_input(
+                                  "MoveY", float(v)))
+        self.in_my.pack(side="left")
+        ttk.Button(io, text="Stop move",
+                   command=lambda: (self.in_mx.set(0), self.in_my.set(0),
+                                    self._osc_input("MoveX", 0.0),
+                                    self._osc_input("MoveY", 0.0))
+                   ).pack(side="left", padx=3)
+        for label, addr in (("Jump", "Jump"), ("Run", "Run"),
+                            ("Sprint", "Sprint"), ("Use", "UseRight"),
+                            ("Grab", "GrabRight"), ("Voice", "Voice"),
+                            ("Nod", "NOD"), ("Shake", "SHAKE")):
+            ttk.Button(io, text=label,
+                       command=lambda a=addr: self._osc_tap(a)).pack(
+                side="left", padx=2)
+
+        pn = ttk.LabelFrame(f, text="MIDI piano (piano worlds - sends "
+                                     "/midi OSC notes)", padding=6)
+        pn.grid(row=21, column=0, sticky="ew", pady=3)
+        ttk.Label(pn, text="Ch:").pack(side="left")
+        self.midi_ch = ttk.Spinbox(pn, from_=0, to=15, width=3, value=0)
+        self.midi_ch.pack(side="left", padx=2)
+        ttk.Label(pn, text="Vel:").pack(side="left")
+        self.midi_vel = ttk.Spinbox(pn, from_=1, to=127, width=4, value=100)
+        self.midi_vel.pack(side="left", padx=2)
+        kbd = ttk.Frame(pn)
+        kbd.pack(side="left", padx=6)
+        names = "C C# D D# E F F# G G# A A# B".split()
+        for i in range(24):
+            note = 60 + i
+            b = tk.Button(kbd, text=names[i % 12] + str(4 + i // 12),
+                          padx=2, pady=2,
+                          font=("Segoe UI", 7),
+                          bg="#333" if "#" in names[i % 12] else "#eee",
+                          fg="#fff" if "#" in names[i % 12] else "#000")
+            b.grid(row=0, column=i, padx=1)
+            b.bind("<ButtonPress-1>",
+                   lambda e, n=note: self._osc_midi(n, 1))
+            b.bind("<ButtonRelease-1>",
+                   lambda e, n=note: self._osc_midi(n, 0))
+
+        av = ttk.LabelFrame(f, text="Avatar quick-swap via OSC (avatar ID, "
+                                    "instant, in-game)", padding=6)
+        av.grid(row=22, column=0, sticky="ew", pady=3)
+        ttk.Label(av, text="Avatar ID:").pack(side="left")
+        self.osc_av = ttk.Entry(av, width=30)
+        self.osc_av.pack(side="left", padx=3)
+        ttk.Button(av, text="Swap now",
+                   command=lambda: (self.osc.send(
+                       "/avatar", self.osc_av.get().strip()),
+                       self.status("Avatar swap sent."))).pack(
+            side="left", padx=4)
         ttk.Label(ps, text="User:").pack(side="left")
         self.ps_user = ttk.Entry(ps, width=10); self.ps_user.pack(side="left", padx=2)
         ttk.Label(ps, text="API key:").pack(side="left")
