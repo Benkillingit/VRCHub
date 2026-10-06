@@ -97,6 +97,9 @@ VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel 
 - **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
 - **Delete** — removes it from your vault only.
 
+### Screen light sync (4.7)
+Ambilight for VRChat: Extras → **Screen light sync**. Grabs the screen ~1x/second, averages the color, and drives a Tuya-based Geeni bulb to match (neon world = neon room). Optional deps: `pip install Pillow tinytuya`. Get Device ID + Local key with `python -m tinytuya wizard` (same LAN). Values stay in local config. Sends only on meaningful color change to avoid spamming the bulb. Note: this matches *screen* color; VRChat does not expose scene lighting to external apps.
+
 ### Desktop overlay (4.6)
 Extras → **Open desktop overlay**: a small always-on-top window with a clock, a status line, and a quick chatbox send box. Drag to move it, right-click to close, Enter sends. 85% opacity, no window chrome. Meant for desktop-mode play; on Linux some compositors ignore always-on-top.
 
