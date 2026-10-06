@@ -44,6 +44,7 @@ import sys
 import tempfile
 import threading
 import time
+import collections
 import webbrowser
 import urllib.error
 import urllib.parse
@@ -53,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.0.0"
+APP_VERSION = "6.1.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1073,6 +1074,7 @@ class VRCHubApp(tk.Tk):
 
         self.osc.send = _hooked_send
         self.api = VRChatAPI()
+        self._feed = collections.deque(maxlen=30)
         self.twitch = None
         self.hr_ws = None
         self.hr_running = False
@@ -1118,6 +1120,8 @@ class VRCHubApp(tk.Tk):
 
     def status(self, msg):
         self.status_var.set(msg)
+        if len(str(msg)) > 1 and str(msg) != "Ready.":
+            self._feed.append("%s %s" % (time.strftime("%H:%M"), msg))
         self.after(6000, lambda: self.status_var.set("Ready."))
 
     def _send_chatbox(self, text):
@@ -3535,10 +3539,25 @@ class VRCHubApp(tk.Tk):
                 "<script>document.getElementById('t')."
                 "addEventListener('keydown',e=>{if(e.key==='Enter')"
                 "{fetch('/send',{method:'POST',body:e.target.value});"
-                "e.target.value=''}})</script></body></html>")
+                "e.target.value=''}})</script>"
+                "<hr><h3>Live overlay feed</h3><div id=feed "
+                "style='font-size:13px;text-align:left;max-width:600px;"
+                "margin:0 auto;color:#9f9'></div>"
+                "<script>setInterval(()=>{fetch('/feed').then(r=>"
+                "r.json()).then(l=>{document.getElementById('feed')"
+                ".innerHTML=l.map(x=>'<div>'+x+'</div>').join('')})},5000)"
+                "</script></body></html>")
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path == "/feed":
+                    body = json.dumps(list(app._feed)).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
@@ -4536,6 +4555,134 @@ class VRCHubApp(tk.Tk):
         self._fill_saved_avatars()
         self.status("Imported %d section(s)." % len(data))
 
+    def _net_toggle(self):
+        if self.net_on.get():
+            self.net_on.set(False)
+            self.net_btn.config(text="Start")
+            self.status("Net speed off.")
+            return
+        self.net_on.set(True)
+        self.net_btn.config(text="Stop")
+
+        def work():
+            while self.net_on.get():
+                try:
+                    t0 = time.time()
+                    with urllib.request.urlopen(
+                            "https://speed.cloudflare.com/__down"
+                            "?bytes=2000000", timeout=30) as r:
+                        while r.read(65536):
+                            pass
+                    mbps = round(16 / max(time.time() - t0, 0.01), 1)
+                    self.after(0, lambda m=mbps: self.osc.chatbox(
+                        "Net: %s Mbps" % m))
+                    self.after(0, lambda m=mbps: self.status(
+                        "Net: %s Mbps" % m))
+                except Exception as e:
+                    self.after(0, lambda: self.status(
+                        "Net test: %s" % e.__class__.__name__))
+                for _ in range(900):
+                    if not self.net_on.get():
+                        return
+                    time.sleep(1)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Net speed test every 15 min.")
+
+    def _crash_toggle(self):
+        if self.crash_on.get():
+            self.crash_on.set(False)
+            self.crash_btn.config(text="Start")
+            self.status("Crash guard off.")
+            return
+        if sys.platform != "win32":
+            self.status("Crash guard is Windows-only.")
+            return
+        self.crash_on.set(True)
+        self.crash_btn.config(text="Stop")
+
+        def work():
+            was = False
+            last_world = ""
+            while self.crash_on.get():
+                try:
+                    out = subprocess.check_output(
+                        ["tasklist", "/FI", "IMAGENAME eq VRChat.exe"],
+                        stderr=subprocess.DEVNULL).decode("utf-8", "replace")
+                    running = "VRChat.exe" in out
+                except Exception:
+                    running = False
+                if running and self.cfg.get("vrchat_cookies"):
+                    try:
+                        me = self.api.me()
+                        loc = me.get("presence", {}).get("world", "")
+                        if loc and "wrld_" in loc:
+                            last_world = loc
+                    except Exception:
+                        pass
+                if was and not running:
+                    self.after(0, lambda: self.status(
+                        "VRChat crashed! Rejoining %s..." % last_world[:30]))
+                    if last_world:
+                        try:
+                            os.startfile("vrchat://launch?id=" + last_world)
+                        except Exception:
+                            pass
+                    time.sleep(120)
+                    continue
+                was = running
+                for _ in range(20):
+                    if not self.crash_on.get():
+                        return
+                    time.sleep(1)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Crash guard watching VRChat.")
+
+    def _pishock(self, op):
+        u, k, c = (self.ps_user.get().strip(), self.ps_key.get().strip(),
+                   self.ps_code.get().strip())
+        if not (u and k and c):
+            self.status("Fill PiShock user, API key and share code.")
+            return
+        try:
+            body = {"Username": u, "Apikey": k, "Code": c, "Op": op,
+                    "Duration": int(self.ps_dur.get()),
+                    "Intensity": int(self.ps_pow.get())}
+        except ValueError:
+            self.status("Bad power/duration numbers.")
+            return
+
+        def work():
+            try:
+                req = urllib.request.Request(
+                    "https://do.pishock.com/api/apiexecute",
+                    data=json.dumps(body).encode(),
+                    headers={"Content-Type": "application/json",
+                             "User-Agent": "VRCHub/" + APP_VERSION},
+                    method="POST")
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    out = r.read().decode("utf-8", "replace")[:60]
+                self.after(0, lambda o=out: self.status("PiShock: %s" % o))
+            except Exception as e:
+                self.after(0, lambda: self.status(
+                    "PiShock: %s" % str(e)[:60]))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _dashboard(self):
+        """VRCX-style dashboard: which friends are in which worlds."""
+        friends = self.api.friends_online()
+        by_world = collections.defaultdict(list)
+        for f in friends:
+            w = f["world"]
+            if w and w != "offline" and w != "traveling":
+                by_world[w].append(f["name"])
+        if not by_world:
+            return "Everyone is offline."
+        out = []
+        for w, names in sorted(by_world.items(), key=lambda x: -len(x[1])):
+            out.append("%s [%d]: %s" % (w[-14:], len(names),
+                                        ", ".join(names[:6])))
+        return " || ".join(out[:6])
+
     # ---- weather + clock (MCB/VRCOSC parity)
 
     WCODES = {0: "clear", 1: "mostly clear", 2: "partly cloudy",
@@ -4873,6 +5020,45 @@ class VRCHubApp(tk.Tk):
                                     "(open-meteo, free, no key)",
                             padding=6)
         wx.grid(row=16, column=0, sticky="ew", pady=3)
+        ns = ttk.LabelFrame(f, text="Net speed in chatbox (Cloudflare "
+                                     "2MB download test)", padding=6)
+        ns.grid(row=17, column=0, sticky="ew", pady=3)
+        self.net_on = tk.BooleanVar(value=False)
+        self.net_btn = ttk.Button(ns, text="Start", command=self._net_toggle)
+        self.net_btn.pack(side="left")
+        ttk.Label(ns, text="(every 15 min: 'Net: 94 Mbps')").pack(
+            side="left", padx=6)
+
+        cg = ttk.LabelFrame(f, text="Crash guard - restart VRChat + "
+                                     "rejoin last instance (Windows)",
+                            padding=6)
+        cg.grid(row=18, column=0, sticky="ew", pady=3)
+        self.crash_on = tk.BooleanVar(value=False)
+        self.crash_btn = ttk.Button(cg, text="Start",
+                                    command=self._crash_toggle)
+        self.crash_btn.pack(side="left")
+        ttk.Label(cg, text="(watches the VRChat process; on crash it "
+                           "relaunches into your last world via "
+                           "vrchat:// launch link)").pack(side="left", padx=6)
+
+        ps = ttk.LabelFrame(f, text="PiShock (shock collar control - "
+                                    "needs your PiShock username, API key "
+                                    "and share code)", padding=6)
+        ps.grid(row=19, column=0, sticky="ew", pady=3)
+        ttk.Label(ps, text="User:").pack(side="left")
+        self.ps_user = ttk.Entry(ps, width=10); self.ps_user.pack(side="left", padx=2)
+        ttk.Label(ps, text="API key:").pack(side="left")
+        self.ps_key = ttk.Entry(ps, width=12, show="*"); self.ps_key.pack(side="left", padx=2)
+        ttk.Label(ps, text="Share code:").pack(side="left")
+        self.ps_code = ttk.Entry(ps, width=6); self.ps_code.pack(side="left", padx=2)
+        ttk.Label(ps, text="Power:").pack(side="left")
+        self.ps_pow = ttk.Spinbox(ps, from_=1, to=100, width=4, value=20); self.ps_pow.pack(side="left", padx=2)
+        ttk.Label(ps, text="Sec:").pack(side="left")
+        self.ps_dur = ttk.Spinbox(ps, from_=1, to=15, width=3, value=1); self.ps_dur.pack(side="left", padx=2)
+        for op, label in (("0", "Shock"), ("1", "Vibe"), ("2", "Beep")):
+            ttk.Button(ps, text=label,
+                       command=lambda o=op: self._pishock(o)).pack(
+                side="left", padx=3)
         ttk.Label(wx, text="City:").pack(side="left")
         self.wx_city = ttk.Entry(wx, width=14)
         self.wx_city.insert(0, self.cfg.get("wx_city", ""))
@@ -4888,6 +5074,9 @@ class VRCHubApp(tk.Tk):
                         command=self._vrcn_stats).pack(side="left")
         ttk.Button(st, text="Show stats",
                    command=self._vrcn_show_stats).pack(side="left", padx=4)
+        ttk.Button(st, text="Dashboard (friends by world)",
+                   command=lambda: self._vrcn_go(
+                       self._dashboard)).pack(side="left", padx=4)
         ttk.Button(st, text="Timeline",
                    command=lambda: self._vrcn_go(
                        lambda: " || ".join(self.cfg.get("timeline", []))
