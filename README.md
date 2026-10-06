@@ -17,6 +17,10 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **Connections tab (NEW in 2.1)** | |
+| Connect to VRCX via its WebSocket server (live events, friend join/leave announces in chatbox) | VRCX |
+| OSC listener — see the live wire traffic between VRChat and all your apps (VRCX/VRCOSC/MCB all speak OSC) | all five |
+| App detection — scan which of the five apps are running and whether VRCX's port is open | all five |
 | AI Chat with relay to chatbox (ghost persona) | Bas44 NPC project |
 
 The full apps stay separate installs (they're excellent — this hub covers the parts you use daily in one window).
@@ -40,6 +44,10 @@ Works on Linux/macOS too (window-title media detection and autodetect are Window
 - **Avatar equip**: select an avatar in the list and hit "Equip selected" — it swaps in-game, just like VRCX hot-swap.
 - **Twitch**: type a channel name, Connect. Anonymous read-only; messages optionally relay to your chatbox.
 - **HypeRate**: enter the join code shown in the HypeRate phone/watch app, Connect. BPM shows in the window and optionally in your chatbox.
+- **Connections tab**: 
+  - In VRCX open Settings → WebSocket Server, enable it (default port 9739), set a token, then enter host/port/token here and Connect. You'll see live VRCX events in the log; friend joins/leaves can be announced automatically in your chatbox.
+  - OSC listener: pick a free UDP port (VRCX uses 9001, so try 9002 to avoid clashing) and hit Listen — every OSC message flying between VRChat and your other apps shows up live.
+  - App detection: Scan shows which of the tools are running right now.
 - **Launcher**: hit "Autodetect" or paste paths; they're saved to `vrchub_config.json`.
 
 ## Notes
