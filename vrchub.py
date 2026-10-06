@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.3.0"
+APP_VERSION = "4.4.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -1216,6 +1216,27 @@ class VRCHubApp(tk.Tk):
                              "box and Save to add manually; equip works "
                              "even logged out, via OSC)"
                   ).pack(side="left", padx=6)
+        crow = ttk.Frame(sa)
+        crow.pack(fill="x", pady=(4, 0))
+        ttk.Label(crow, text="Cloud sync (GitHub database - access "
+                            "anywhere):").pack(side="left")
+        self.cloud_token = ttk.Entry(crow, width=18, show="*")
+        self.cloud_token.insert(0, self.cfg.get("github_token", ""))
+        self.cloud_token.pack(side="left", padx=3)
+        self.cloud_repo = ttk.Entry(crow, width=22)
+        self.cloud_repo.insert(0, self.cfg.get(
+            "cloud_repo", "Benkillingit/vrchub-data"))
+        self.cloud_repo.pack(side="left", padx=3)
+        ttk.Button(crow, text="Create repo", width=11,
+                   command=lambda: self._cloud_create_repo()).pack(
+            side="left", padx=2)
+        ttk.Button(crow, text="Push", width=6,
+                   command=self._cloud_push).pack(side="left", padx=2)
+        ttk.Button(crow, text="Pull", width=6,
+                   command=self._cloud_pull).pack(side="left", padx=2)
+        ttk.Label(crow, text="(token first, user/repo second; private "
+                             "repo = only you see it)").pack(side="left",
+                                                             padx=6)
         self.avatar_tree.bind("<<TreeviewSelect>>",
                               lambda e: self._avatar_selected())
 
@@ -1277,6 +1298,108 @@ class VRCHubApp(tk.Tk):
             save_config(self.cfg)
             self._fill_saved_avatars()
             self.status("Removed (%d left)." % len(saved))
+
+    def _cloud_api(self, method, url, body=None):
+        req = urllib.request.Request(url, method=method)
+        req.add_header("Authorization", "Bearer "
+                       + self.cfg.get("github_token", ""))
+        req.add_header("User-Agent", "VRCHub")
+        req.add_header("Accept", "application/vnd.github+json")
+        data = json.dumps(body).encode() if body is not None else None
+        with urllib.request.urlopen(req, data) as r:
+            return json.load(r)
+
+    def _cloud_url(self, fname):
+        return ("https://api.github.com/repos/%s/contents/%s"
+                % (self.cfg.get("cloud_repo", "").strip(), fname))
+
+    def _cloud_create_repo(self):
+        self.cfg["github_token"] = self.cloud_token.get().strip()
+        repo = self.cloud_repo.get().strip()
+        short = repo.split("/")[-1]
+        if not self.cfg["github_token"] or not repo:
+            self.status("Enter token and repo first.")
+            return
+        self.cfg["cloud_repo"] = repo
+
+        def work():
+            try:
+                self._cloud_api("POST", "https://api.github.com/user/repos",
+                                {"name": short, "private": True})
+                save_config(self.cfg)
+                self.after(0, lambda: self.status(
+                    "Repo %s created (private)." % repo))
+            except urllib.error.HTTPError as e:
+                msg = "Repo create: %d" % e.code
+                if e.code == 422:
+                    msg = "Repo already exists."
+                self.after(0, lambda m=msg: self.status(m))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Creating repo...")
+
+    def _cloud_push(self):
+        self.cfg["github_token"] = self.cloud_token.get().strip()
+        self.cfg["cloud_repo"] = self.cloud_repo.get().strip()
+        if not self.cfg["github_token"] or not self.cfg["cloud_repo"]:
+            self.status("Enter token and repo first.")
+            return
+        saved = self.cfg.get("saved_avatars", [])
+        body = {"avatars": saved, "pushed": time.strftime(
+            "%Y-%m-%d %H:%M:%S"), "count": len(saved)}
+
+        def work():
+            try:
+                content = base64.b64encode(json.dumps(body).encode())
+                sha = None
+                try:
+                    sha = self._cloud_api(
+                        "GET", self._cloud_url("saved_avatars.json")
+                    )["sha"]
+                except Exception:
+                    pass
+                payload = {"message": "VRCHub vault sync (%d avatars)"
+                           % len(saved),
+                           "content": content.decode()}
+                if sha:
+                    payload["sha"] = sha
+                self._cloud_api("PUT", self._cloud_url("saved_avatars.json"),
+                                payload)
+                save_config(self.cfg)
+                self.after(0, lambda: self.status(
+                    "Pushed %d avatar(s) to cloud." % len(saved)))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Pushing...")
+
+    def _cloud_pull(self):
+        self.cfg["github_token"] = self.cloud_token.get().strip()
+        self.cfg["cloud_repo"] = self.cloud_repo.get().strip()
+
+        def work():
+            try:
+                remote = self._cloud_api(
+                    "GET", self._cloud_url("saved_avatars.json"))
+                data = json.loads(base64.b64decode(remote["content"]))
+                cloud = data.get("avatars", [])
+                local = self.cfg.setdefault("saved_avatars", [])
+                ids = {s.get("id") for s in local}
+                added = 0
+                for a in cloud:
+                    if a.get("id") not in ids:
+                        local.append(a)
+                        added += 1
+                save_config(self.cfg)
+                self.after(0, self._fill_saved_avatars)
+                self.after(0, lambda: self.status(
+                    "Pulled: %d new from cloud, %d total."
+                    % (added, len(local))))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Pulling...")
 
     def _try_session(self):
         cookies = self.cfg.get("vrchat_cookies", {})
