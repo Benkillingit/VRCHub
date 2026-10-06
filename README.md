@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.4** | |
+| Voice suite — mic to chatbox (built-in Windows speech), speech + typed auto-translate (free, no key), OSC router echo with delay (OscGoesBrrr-style) | ecosystem sweep 2 |
 | **NEW in 5.3** | |
 | Community plugin system — anyone can add features: drop a .py in plugins/, panel appears in a Plugins tab; PLUGINS.md guide + template for contributors | user request |
 | **NEW in 5.2** | |
