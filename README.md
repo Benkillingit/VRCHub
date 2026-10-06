@@ -106,3 +106,7 @@ Standing on the shoulders of [VRCX](https://github.com/vrcx/VRCX), [VRCOSC](http
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Honest origin note
+
+VRCHub was mostly built by AI (a Base44 Superagent pair-programming with the owner, October 2026). Design decisions, feature sweep, and code are AI-generated; human so far is the idea man, tester, and boss. As volunteer contributors come in, expect that balance to shift. Bugs you find may be machine-made — report them anyway.
