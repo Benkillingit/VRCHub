@@ -17,6 +17,9 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.3** | |
+| Unlimited local avatar vault — save/equip/delete avatars, no VRChat favorite-slot limit | user request |
+| Login accepts VRChat username OR email | user request |
 | **NEW in 4.2** | |
 | VRChat native input controls — Run, Walk, Comfort turn, Drop, Grab, Use, Voice, Panic (official /input/ endpoints) | VRChat OSC |
 | Switch avatar by avtr_ ID via OSC — no login needed | VRCX-style |
