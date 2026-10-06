@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.5.0"
+APP_VERSION = "6.5.1"
 
 # VRCNext-style dark palette
 VRN_BG = "#15171c"      # window background
@@ -66,6 +66,23 @@ VRN_MUTED = "#8b93a4"   # secondary text
 VRN_FIELD = "#11131a"   # input fields
 VRN_HOVER = "#242b38"   # hover
 VRN_SEL = "#22314f"     # selected nav
+NAV_ICONS = {0: "💬", 1: "🤖", 4: "🎵", 2: "🌐", 11: "🧭", 5: "🌍",
+             3: "🎭", 9: "👁", 8: "🔗", 6: "🧰", 13: "🚀", 7: "🧩",
+             10: "❓", 12: "⭐"}
+NAV_SUBS = {0: "Send text to the VRChat chatbox",
+            1: "Talk to an AI through OSC",
+            4: "Media keys and chat presence",
+            2: "Friends, avatars, instances",
+            11: "Search and manage anything on VRChat",
+            5: "World search and favorites",
+            3: "Live avatar parameters over OSC",
+            9: "Face tracking to avatar params",
+            8: "Friend activity and watchlist",
+            6: "Tweaks and quick tools",
+            13: "Start VRChat your way",
+            7: "Load extra features",
+            10: "Docs and getting started",
+            12: "Borrowed from VRCNext"}
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1286,22 +1303,28 @@ class VRCHubApp(tk.Tk):
     def _nav_build(self, nav):
         """Build the VRCNext-style left sidebar."""
         side = self._nav_side
-        hdr = tk.Label(side, text="VRCHub", bg=VRN_SIDE, fg="#ffffff",
-                       font=("Segoe UI", 16, "bold"))
-        hdr.pack(anchor="w", padx=18, pady=(16, 0))
+        lg = tk.Canvas(side, bg=VRN_SIDE, width=212, height=54,
+                       highlightthickness=0)
+        lg.pack(fill="x", pady=(14, 2))
+        lg.create_oval(24, 12, 52, 40, fill=VRN_ACCENT, outline="")
+        lg.create_oval(31, 19, 45, 33, fill=VRN_SIDE, outline="")
+        lg.create_text(62, 26, text="VRCHub", fill="#ffffff",
+                       font=("Segoe UI", 15, "bold"), anchor="w")
+        self._nav_names = {}
         tk.Label(side, text="v%s" % APP_VERSION, bg=VRN_SIDE,
                  fg=VRN_MUTED,
-                 font=("Segoe UI", 9)).pack(anchor="w", padx=18,
-                                            pady=(0, 8))
+                 font=("Segoe UI", 9)).pack(side="bottom", pady=8)
         for cat, items in nav:
             tk.Label(side, text=cat, bg=VRN_SIDE, fg=VRN_MUTED,
                      font=("Segoe UI", 8, "bold")).pack(
                 anchor="w", padx=18, pady=(10, 3))
             for label, idx in items:
-                b = tk.Label(side, text="  " + label, bg=VRN_SIDE,
-                             fg=VRN_FG, font=("Segoe UI", 10),
-                             anchor="w", padx=10, pady=4,
-                             cursor="hand2")
+                icon = NAV_ICONS.get(idx, "•")
+                self._nav_names[idx] = label
+                b = tk.Label(side, text="  %s  %s" % (icon, label),
+                             bg=VRN_SIDE, fg=VRN_FG,
+                             font=("Segoe UI", 10), anchor="w",
+                             padx=10, pady=4, cursor="hand2")
                 b.pack(fill="x", padx=8, pady=1)
                 b.bind("<Button-1>",
                        lambda e, i=idx: self._nav_select(i))
@@ -1325,6 +1348,12 @@ class VRCHubApp(tk.Tk):
                 b.config(bg=VRN_SEL, fg="#ffffff")
             else:
                 b.config(bg=VRN_SIDE, fg=VRN_FG)
+        try:
+            self._hdr_title.config(text=self._nav_names.get(idx, ""))
+            self._hdr_sub.config(
+                text=NAV_SUBS.get(idx, "one app, instead of ten"))
+        except (AttributeError, tk.TclError):
+            pass
 
     def _dark_walk(self, w=None):
         """Recolor classic (non-ttk) widgets to the dark palette."""
@@ -1370,13 +1399,27 @@ class VRCHubApp(tk.Tk):
         self._server_check(first=True)
         threading.Thread(target=self._activity_loop, daemon=True).start()
         threading.Thread(target=self._together_loop, daemon=True).start()
-        nb = ttk.Notebook(self)
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True)
-        side = tk.Frame(wrap, bg=VRN_SIDE, width=200)
+        side = tk.Frame(wrap, bg=VRN_SIDE, width=212)
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
-        nb.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        cont = ttk.Frame(wrap)
+        cont.pack(side="left", fill="both", expand=True)
+        self._hdr = tk.Frame(cont, bg=VRN_PANEL, height=56)
+        self._hdr.pack(fill="x", padx=6, pady=(6, 0))
+        self._hdr.pack_propagate(False)
+        self._hdr_title = tk.Label(self._hdr, text="",
+                                   bg=VRN_PANEL, fg="#ffffff",
+                                   font=("Segoe UI", 15, "bold"))
+        self._hdr_title.pack(side="left", padx=16, pady=(14, 0))
+        self._hdr_sub = tk.Label(self._hdr, text="one app, instead "
+                                 "of ten", bg=VRN_PANEL,
+                                 fg=VRN_MUTED,
+                                 font=("Segoe UI", 9))
+        self._hdr_sub.pack(side="left", padx=(6, 0), pady=(19, 0))
+        nb = ttk.Notebook(cont)
+        nb.pack(fill="both", expand=True, padx=6, pady=6)
         self._tab_chatbox(nb)
         self._tab_ai(nb)
         self._tab_api(nb)
