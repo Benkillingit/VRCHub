@@ -41,6 +41,7 @@ import ssl
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -52,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.3.0"
+APP_VERSION = "5.4.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1082,6 +1083,28 @@ class VRCHubApp(tk.Tk):
         anim = ttk.LabelFrame(f, text="Animate a message (VRCOSC-style)",
                               padding=6)
         anim.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        vt = ttk.LabelFrame(f, text="Voice + translate (TTS-Voice-Wizard / "
+                                    "VRCT style)", padding=6)
+        vt.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        self.voice_btn = ttk.Button(vt, text="Mic: OFF - click to talk",
+                                   command=self._voice_toggle)
+        self.voice_btn.pack(side="left")
+        ttk.Label(vt, text="Speak into chatbox as:").pack(side="left",
+                                                          padx=(10, 2))
+        self.voice_mode = ttk.Combobox(vt, width=9, state="readonly",
+                                        values=("direct", "translated"))
+        self.voice_mode.set("direct")
+        self.voice_mode.pack(side="left", padx=2)
+        self.tr_lang = ttk.Combobox(
+            vt, width=4, state="readonly",
+            values=("en", "es", "ja", "de", "fr", "pt", "ru", "zh"))
+        self.tr_lang.set("en")
+        self.tr_lang.pack(side="left", padx=2)
+        self.auto_tr = tk.BooleanVar(value=False)
+        ttk.Checkbutton(vt, text="Auto-translate my typed messages",
+                        variable=self.auto_tr).pack(side="left", padx=8)
+        ttk.Label(vt, text="(mic uses built-in Windows speech; translate "
+                           "is free, no key)").pack(side="left", padx=6)
         self.anim_text = ttk.Entry(anim, width=30)
         self.anim_text.insert(0, "hello!")
         self.anim_text.pack(side="left")
@@ -1111,7 +1134,13 @@ class VRCHubApp(tk.Tk):
     def _send_from_entry(self):
         text = self.chat_entry.get().strip()
         if text:
-            self._send_chatbox(text)
+            if self.auto_tr.get():
+                def work():
+                    out = self._translate(text, self.tr_lang.get())
+                    self.after(0, lambda: self._send_chatbox(out or text))
+                threading.Thread(target=work, daemon=True).start()
+            else:
+                self._send_chatbox(text)
             self.chat_entry.delete(0, "end")
             if self.typing_var.get():
                 self.osc.typing(False)
@@ -2548,6 +2577,21 @@ class VRCHubApp(tk.Tk):
                                                     font=("Consolas", 9),
                                                     wrap="word")
         self.extras_log.grid(row=11, column=0, sticky="ew", pady=(8, 0))
+        rt = ttk.LabelFrame(f, text="OSC router (OscGoesBrrr-style echo)",
+                            padding=6)
+        rt.grid(row=12, column=0, sticky="ew", pady=3)
+        self.router_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(rt, text="Echo incoming OSC back to VRChat",
+                        variable=self.router_on).pack(side="left")
+        ttk.Label(rt, text="Prefix:").pack(side="left", padx=(10, 2))
+        self.router_prefix = ttk.Entry(rt, width=12)
+        self.router_prefix.insert(0, "/chatbox")
+        self.router_prefix.pack(side="left", padx=2)
+        ttk.Label(rt, text="Delay s:").pack(side="left", padx=2)
+        self.router_delay = ttk.Spinbox(rt, from_=0, to=10, width=3,
+                                        increment=0.5)
+        self.router_delay.set(1)
+        self.router_delay.pack(side="left", padx=2)
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -3123,6 +3167,80 @@ class VRCHubApp(tk.Tk):
         self._plugins_render()
         self.status("Plugins rescanned: %d loaded." % len(self.plugins))
 
+    # ---- voice + translate
+
+    def _translate(self, text, target):
+        """Free Google translate (gtx), no key. Returns text or None."""
+        try:
+            url = ("https://translate.googleapis.com/translate_a/single"
+                   "?client=gtx&sl=auto&tl=%s&dt=t&q=%s"
+                   % (target, urllib.parse.quote(text)))
+            req = urllib.request.Request(url, headers={"User-Agent":
+                                                        VRCAPI.UA})
+            d = json.load(urllib.request.urlopen(req, timeout=12))
+            return "".join(part[0] for part in d[0] if part[0])
+        except Exception:
+            return None
+
+    def _voice_toggle(self):
+        if getattr(self, "_voice_proc", None):
+            self._voice_proc.terminate()
+            self._voice_proc = None
+            self.voice_btn.config(text="Mic: OFF - click to talk")
+            self.status("Mic off.")
+            return
+        if sys.platform != "win32":
+            self.status("Mic needs Windows (built-in speech engine).")
+            return
+        ps = '\n'.join(['Add-Type -AssemblyName System.Speech', '$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine', '$rec.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))', '$rec.SetInputToDefaultAudioDevice()', '$rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(2)', 'while ($true) {', '  try { $r = $rec.Recognize(); if ($r -and $r.Text) { Write-Output $r.Text } }', '  catch { }', '}', ''])
+        try:
+            path = os.path.join(tempfile.gettempdir(), "vrchub_mic.ps1")
+            open(path, "w").write(ps)
+            self._voice_proc = subprocess.Popen(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                 "-File", path], stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True,
+                encoding="utf-8", errors="replace")
+        except OSError as e:
+            self.status("Mic failed: %s" % str(e)[:60])
+            return
+        self.voice_btn.config(text="Mic: LIVE - click to stop")
+        self.status("Mic live - speak; lines go to chatbox.")
+
+        def reader():
+            for line in self._voice_proc.stdout:
+                text = line.strip()
+                if not text or not getattr(self, "_voice_proc", None):
+                    break
+                if self.voice_mode.get() == "translated":
+                    out = self._translate(text, self.tr_lang.get()) or text
+                else:
+                    out = text
+                self.after(0, lambda t=out: self._send_chatbox(t))
+        threading.Thread(target=reader, daemon=True).start()
+
+    # ---- OSC router
+
+    def _router_echo(self, addr, args):
+        if (not getattr(self, "router_on", None)
+                or not self.router_on.get()
+                or not addr.startswith(self.router_prefix.get())):
+            return
+        try:
+            delay = float(self.router_delay.get())
+        except (tk.TclError, ValueError):
+            delay = 1.0
+
+        def send_later():
+            try:
+                self.osc.send(addr, *args)
+            except Exception:
+                pass
+        if delay <= 0:
+            send_later()
+        else:
+            self.after(int(delay * 1000), send_later)
+
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
         self._ban_frame = tk.Frame(self, bg="#222", height=26)
@@ -3659,6 +3777,7 @@ class VRCHubApp(tk.Tk):
                     return
                 tag = "WORLD " if addr.startswith("/world/") else ""
                 self._log_to(self.osc_log, "%s%s %s" % (tag, addr, args))
+                self._router_echo(addr, args)
                 for p in getattr(self, "plugins", []):
                     hook = getattr(p, "on_osc", None)
                     if hook:
