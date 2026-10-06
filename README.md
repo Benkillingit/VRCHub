@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.1** | |
+| Face tracking tab — webcam blendshapes to VRChat FT params (optional pip deps) | VRCFT-style |
 | **NEW in 4.0** | |
 | Full documentation — DOCS.md (tutorial, every tab, troubleshooting) | |
 | In-app Help tab with quick start | |
