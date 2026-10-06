@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-VRCHub 2.1 — one app for your VRChat toolkit.
+VRCHub 3.0 — one app for your VRChat toolkit.
 Single-file, stdlib-only Python. Windows-focused, works on Linux/macOS.
 
 Feature union of VRCX + VRCNext + VRC-NEXUS + VRCOSC + MagicChatbox:
@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "2.1.0"
+APP_VERSION = "3.0.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -246,6 +246,84 @@ class VRChatAPI:
                  "author": a.get("authorName", "?"),
                  "desc": (a.get("description") or "")[:80]}
                 for a in self._json(text)]
+
+    def search_worlds(self, query):
+        q = "/worlds?search=" + urllib.parse.quote(query) + "&n=20"
+        status, text = self._request("GET", q)
+        if status != 200:
+            raise RuntimeError("World search failed: " + text[:120])
+        return [{"id": w.get("id"), "name": w.get("name", "?"),
+                 "author": w.get("authorName", "?"),
+                 "occupants": w.get("occupants", 0)}
+                for w in self._json(text)]
+
+    def world_instances(self, world_id):
+        status, text = self._request("GET", "/worlds/%s"
+                                    % urllib.parse.quote(world_id))
+        if status != 200:
+            raise RuntimeError("World lookup failed: " + text[:120])
+        d = self._json(text)
+        out = []
+        for ins in d.get("instances", []):
+            if isinstance(ins, (list, tuple)) and ins:
+                occ = 0
+                if len(ins) > 1:
+                    if isinstance(ins[1], (int, float)):
+                        occ = int(ins[1])
+                    elif isinstance(ins[1], dict):
+                        for k in ("count", "occupantCount", "occupants"):
+                            if isinstance(ins[1].get(k), (int, float)):
+                                occ = int(ins[1][k])
+                                break
+                out.append({"location": ins[0], "occupants": occ})
+            elif isinstance(ins, dict):
+                out.append({"location": ins.get("location", "?"),
+                            "occupants": ins.get("occupantCount", 0)})
+        return d.get("name", "?"), d.get("id", world_id), out
+
+    def notifications(self):
+        status, text = self._request(
+            "GET", "/auth/user/notifications?n=20")
+        if status != 200:
+            raise RuntimeError("Notifications failed: " + text[:120])
+        out = []
+        for n in self._json(text):
+            out.append({"id": n.get("id"),
+                        "type": n.get("type", "?"),
+                        "sender": (n.get("senderUserId") or "?"),
+                        "title": n.get("title", ""),
+                        "detail": json.dumps(n.get("details", {}))[:100]})
+        return out
+
+    def respond_notification(self, notif_id, accept=True):
+        action = "accept" if accept else "hide"
+        status, text = self._request(
+            "PUT", "/auth/user/notifications/%s/%s"
+            % (urllib.parse.quote(notif_id), action))
+        if status not in (200, 201):
+            raise RuntimeError("Notification %s failed: " % action + text[:120])
+
+    def avatar_favorites(self, limit=30):
+        """Favorite avatars with names (VRCX favorite bar)."""
+        status, text = self._request("GET", "/favorites?type=favorite&n=100")
+        if status != 200:
+            raise RuntimeError("Favorites failed: " + text[:120])
+        favs = self._json(text)
+        out = []
+        for f in favs:
+            favid = f.get("favoriteId", "")
+            if not favid.startswith("avtr_"):
+                continue
+            s2, t2 = self._request("GET", "/avatars/%s"
+                                   % urllib.parse.quote(favid))
+            name = favid
+            if s2 == 200:
+                name = self._json(t2).get("name", favid)
+            out.append({"id": favid, "name": name,
+                        "group": f.get("favoriteGroupId", "")})
+            if len(out) >= limit:
+                break
+        return out
 
     def equip_avatar(self, avatar_id):
         status, text = self._request(
@@ -651,6 +729,58 @@ def spotify_title(titles):
 
 # ================================================================ GUI
 
+# ================================================================ system info
+
+def battery_percent():
+    """Battery % on Windows via GetSystemPowerStatus (0/None if absent)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        class SYSTEM_POWER_STATUS(ctypes.Structure):
+            _fields_ = [("ACLineStatus", ctypes.c_ubyte),
+                        ("BatteryFlag", ctypes.c_ubyte),
+                        ("BatteryLifePercent", ctypes.c_ubyte),
+                        ("Reserved1", ctypes.c_ubyte),
+                        ("BatteryLifeTime", ctypes.c_ulong),
+                        ("BatteryFullLifeTime", ctypes.c_ulong)]
+        sps = SYSTEM_POWER_STATUS()
+        if ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(sps)):
+            p = sps.BatteryLifePercent
+            return p if p != 255 else None
+    except Exception:
+        pass
+    return None
+
+
+def ram_usage():
+    """(used_gb, total_gb) on Windows via GlobalMemoryStatusEx."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [("dwLength", ctypes.c_ulong),
+                        ("dwMemoryLoad", ctypes.c_ulong),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        m = MEMORYSTATUSEX()
+        m.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            total = m.ullTotalPhys / (1024 ** 3)
+            used = (m.ullTotalPhys - m.ullAvailPhys) / (1024 ** 3)
+            return round(used, 1), round(total, 1)
+    except Exception:
+        pass
+    return None
+
+
 GESTURES = ["Neutral", "Fist", "Open", "Point", "Peace", "RockNRoll",
             "Gun", "ThumbsUp"]
 
@@ -660,6 +790,16 @@ class VRCHubApp(tk.Tk):
         super().__init__()
         self.cfg = cfg
         self.osc = OSCEngine(cfg["osc_host"], int(cfg["osc_port"]))
+        _base_send = self.osc.send
+
+        def _hooked_send(address, *args):
+            self.last_activity = time.time()
+            if self.afk_running and self._afk_sent and \
+                    address != "/chatbox/input":
+                self._afk_sent = False
+            return _base_send(address, *args)
+
+        self.osc.send = _hooked_send
         self.api = VRChatAPI()
         self.twitch = None
         self.hr_ws = None
@@ -668,6 +808,12 @@ class VRCHubApp(tk.Tk):
         self.vrcx_running = False
         self.osc_listener = None
         self.osc_listening = False
+        self.last_activity = time.time()
+        self.afk_running = False
+        self.watch_running = False
+        self.gcycle_running = False
+        self.sysstat_running = False
+        self._afk_sent = False
         self.cycle_running = False
         self.media_running = False
         self._loop_running = False
@@ -699,6 +845,8 @@ class VRCHubApp(tk.Tk):
         self._tab_api(nb)
         self._tab_params(nb)
         self._tab_media(nb)
+        self._tab_worlds(nb)
+        self._tab_extras(nb)
         self._tab_connect(nb)
         self._tab_tools(nb)
         sb = ttk.Frame(self)
@@ -1262,6 +1410,330 @@ class VRCHubApp(tk.Tk):
 
         threading.Thread(target=run, daemon=True).start()
         self.status("Connecting to HypeRate...")
+
+# ---- Worlds tab (VRCX world browser)
+
+    def _tab_worlds(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Worlds  ")
+
+        row = ttk.Frame(f)
+        row.pack(fill="x", pady=(0, 6))
+        self.world_search = ttk.Entry(row, font=("Segoe UI", 12))
+        self.world_search.pack(side="left", fill="x", expand=True)
+        self.world_search.bind("<Return>", lambda e: self._search_worlds())
+        ttk.Button(row, text="Search", command=self._search_worlds).pack(
+            side="left", padx=6)
+        ttk.Button(row, text="Notifications",
+                   command=self._load_notifications).pack(side="left", padx=6)
+
+        panes = ttk.Frame(f)
+        panes.pack(fill="both", expand=True)
+        wl = ttk.LabelFrame(panes, text="Worlds", padding=4)
+        wl.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
+        self.world_tree = ttk.Treeview(wl, columns=("name", "author", "occ"),
+                                       show="headings", height=9)
+        for c, w in zip(("name", "author", "occ"), (150, 100, 60)):
+            self.world_tree.heading(c, text=c.capitalize())
+            self.world_tree.column(c, width=w)
+        self.world_tree.pack(fill="both", expand=True)
+        self.world_tree.bind("<Double-1>", lambda e: self._load_instances())
+        ttk.Button(wl, text="Show instances", command=self._load_instances).pack(
+            fill="x", pady=3)
+
+        il = ttk.LabelFrame(panes, text="Instances (double-click to join via "
+                                        "browser link)", padding=4)
+        il.grid(row=0, column=1, sticky="nsew")
+        self.inst_tree = ttk.Treeview(il, columns=("location", "occ"),
+                                      show="headings", height=9)
+        for c, w in zip(("location", "occ"), (200, 60)):
+            self.inst_tree.heading(c, text=c.capitalize())
+            self.inst_tree.column(c, width=w)
+        self.inst_tree.pack(fill="both", expand=True)
+        self.inst_tree.bind("<Double-1>", lambda e: self._join_instance())
+        ttk.Button(il, text="Join (open launch link)",
+                   command=self._join_instance).pack(fill="x", pady=3)
+
+        self.notif_log = scrolledtext.ScrolledText(f, height=5, state="disabled",
+                                                   font=("Consolas", 9),
+                                                   wrap="word")
+        self.notif_log.pack(fill="x", pady=(6, 0))
+        panes.columnconfigure(0, weight=1)
+        panes.columnconfigure(1, weight=1)
+        panes.rowconfigure(0, weight=1)
+        self._current_world_id = None
+
+    def _search_worlds(self):
+        q = self.world_search.get().strip()
+        if not q:
+            self.status("Type a world name to search.")
+            return
+
+        def work():
+            try:
+                worlds = self.api.search_worlds(q)
+
+                def fill():
+                    self.world_tree.delete(*self.world_tree.get_children())
+                    for w in worlds:
+                        self.world_tree.insert("", "end", iid=w["id"], values=(
+                            w["name"], w["author"], w["occupants"]))
+                    self.status("%d world(s)." % len(worlds))
+                self.after(0, fill)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Searching worlds...")
+
+    def _load_instances(self):
+        sel = self.world_tree.selection()
+        if not sel:
+            self.status("Pick a world first.")
+            return
+        wid = sel[0]
+
+        def work():
+            try:
+                name, wid2, insts = self.api.world_instances(wid)
+
+                def fill():
+                    self._current_world_id = wid2
+                    self.inst_tree.delete(*self.inst_tree.get_children())
+                    for i in insts:
+                        self.inst_tree.insert("", "end", values=(
+                            i["location"], i["occupants"]))
+                    self.status("%s: %d live instance(s)." % (name,
+                                                              len(insts)))
+                self.after(0, fill)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Loading instances...")
+
+    def _join_instance(self):
+        sel = self.inst_tree.selection()
+        if not sel or not self._current_world_id:
+            self.status("Pick an instance first.")
+            return
+        loc = self.inst_tree.item(sel[0], "values")[0]
+        world_id, _, inst = loc.partition(":")
+        url = ("https://vrchat.com/home/launch?worldId=%s&instanceId=%s"
+               % (world_id, inst or loc))
+        try:
+            if sys.platform == "win32":
+                os.startfile(url)  # noqa
+            else:
+                subprocess.Popen(["xdg-open", url])
+            self.status("Opening launch link - approve it in the browser to "
+                        "jump in.")
+        except Exception as e:
+            self.status("Could not open: %s" % e)
+
+    def _load_notifications(self):
+        def work():
+            try:
+                notifs = self.api.notifications()
+
+                def fill():
+                    self._log_to(self.notif_log, "--- notifications ---")
+                    for n in notifs:
+                        self._log_to(self.notif_log, "[%s] %s %s"
+                                     % (n["type"], n["sender"][:8], n["title"]))
+                    self.status("%d notification(s)." % len(notifs))
+                self.after(0, fill)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Loading notifications...")
+
+    # ---- Extras tab (VRCOSC/MCB extras)
+
+    def _tab_extras(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Extras  ")
+
+        afk = ttk.LabelFrame(f, text="AFK detection (VRCOSC-style)", padding=6)
+        afk.grid(row=0, column=0, sticky="ew", pady=3)
+        ttk.Label(afk, text="After idle (min):").grid(row=0, column=0)
+        self.afk_mins = ttk.Spinbox(afk, from_=1, to=120, width=4, value=15)
+        self.afk_mins.grid(row=0, column=1, padx=4)
+        self.afk_btn = ttk.Button(afk, text="Start", command=self._toggle_afk)
+        self.afk_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(afk, text="- shows 'AFK' in chatbox after idle, 'I'm back!' "
+                            "when you act again").grid(row=0, column=3,
+                                                       padx=8)
+
+        sw = ttk.LabelFrame(f, text="Chatbox stopwatch", padding=6)
+        sw.grid(row=1, column=0, sticky="ew", pady=3)
+        ttk.Label(sw, text="Every (sec):").grid(row=0, column=0)
+        self.watch_secs = ttk.Spinbox(sw, from_=5, to=300, width=4, value=10)
+        self.watch_secs.grid(row=0, column=1, padx=4)
+        self.watch_btn = ttk.Button(sw, text="Start",
+                                    command=self._toggle_watch)
+        self.watch_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(sw, text="- timer updating in chatbox").grid(
+            row=0, column=3, padx=8)
+
+        gc = ttk.LabelFrame(f, text="Random gesture cycler (VRCOSC "
+                                    "'random emote')", padding=6)
+        gc.grid(row=2, column=0, sticky="ew", pady=3)
+        ttk.Label(gc, text="Every (sec):").grid(row=0, column=0)
+        self.gc_secs = ttk.Spinbox(gc, from_=10, to=600, width=4, value=45)
+        self.gc_secs.grid(row=0, column=1, padx=4)
+        self.gc_btn = ttk.Button(gc, text="Start", command=self._toggle_gcycle)
+        self.gc_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(gc, text="- fires a random gesture for 3s").grid(
+            row=0, column=3, padx=8)
+
+        ss = ttk.LabelFrame(ss_txt := f, text="System status (VRCNext-style)",
+                            padding=6)
+        ss.grid(row=3, column=0, sticky="ew", pady=3)
+        ttk.Label(ss, text="Every (sec):").grid(row=0, column=0)
+        self.ss_secs = ttk.Spinbox(ss, from_=30, to=3600, width=4, value=60)
+        self.ss_secs.grid(row=0, column=1, padx=4)
+        self.ss_btn = ttk.Button(ss, text="Start", command=self._toggle_sysstat)
+        self.ss_btn.grid(row=0, column=2, padx=4)
+        ttk.Label(ss, text="- battery + RAM in chatbox (Windows). One-shot:").grid(
+            row=0, column=3, padx=8)
+        ttk.Button(ss, text="Check now", command=self._sysstat_check_show).grid(
+            row=0, column=4)
+
+        self.extras_log = scrolledtext.ScrolledText(f, height=6,
+                                                    state="disabled",
+                                                    font=("Consolas", 9),
+                                                    wrap="word")
+        self.extras_log.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        f.columnconfigure(0, weight=1)
+
+    def _toggle_afk(self):
+        if self.afk_running:
+            self.afk_running = False
+            self.afk_btn.config(text="Start")
+            self.status("AFK watch off.")
+            return
+        try:
+            mins = max(1, int(float(self.afk_mins.get())))
+        except ValueError:
+            mins = 15
+
+        def run():
+            self.afk_running = True
+            self.afk_btn.config(text="Stop")
+            while self.afk_running:
+                idle = time.time() - self.last_activity
+                if idle > mins * 60 and not self._afk_sent:
+                    self.osc.chatbox("AFK")
+                    self._afk_sent = True
+
+                    def note():
+                        self._log_to(self.extras_log, "AFK message sent")
+                    self.after(0, note)
+                elif idle < 10 and self._afk_sent:
+                    self._afk_sent = False
+                    self.osc.chatbox("I'm back!")
+                time.sleep(2)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("AFK watch on (%d min)." % mins)
+
+    def _toggle_watch(self):
+        if self.watch_running:
+            self.watch_running = False
+            self.watch_btn.config(text="Start")
+            self.status("Stopwatch off.")
+            return
+        try:
+            secs = max(5, int(float(self.watch_secs.get())))
+        except ValueError:
+            secs = 10
+
+        def run():
+            self.watch_running = True
+            self.watch_btn.config(text="Stop")
+            t0 = time.time()
+            while self.watch_running:
+                dt = int(time.time() - t0)
+                self.osc.chatbox("%02d:%02d" % (dt // 60, dt % 60))
+                for _ in range(secs * 10):
+                    if not self.watch_running:
+                        return
+                    time.sleep(0.1)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Stopwatch on (%ds updates)." % secs)
+
+    def _toggle_gcycle(self):
+        if self.gcycle_running:
+            self.gcycle_running = False
+            self.gc_btn.config(text="Start")
+            self.status("Gesture cycler off.")
+            return
+        try:
+            secs = max(10, int(float(self.gc_secs.get())))
+        except ValueError:
+            secs = 45
+
+        def run():
+            self.gcycle_running = True
+            self.gc_btn.config(text="Stop")
+            while self.gcycle_running:
+                g = random.choice(GESTURES)
+                self.osc.avatar_param("GestureRight", GESTURES.index(g))
+                time.sleep(3)
+                if not self.gcycle_running:
+                    return
+                self.osc.avatar_param("GestureRight", 0)
+                for _ in range(secs * 10):
+                    if not self.gcycle_running:
+                        return
+                    time.sleep(0.1)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Gesture cycler on (%ds)." % secs)
+
+    def _sysstat_check(self):
+        batt = battery_percent()
+        ram = ram_usage()
+        parts = []
+        if batt is not None:
+            parts.append("Battery %d%%" % batt)
+        if ram:
+            parts.append("RAM %s/%s GB" % ram)
+        return " | ".join(parts) if parts else None
+
+    def _sysstat_check_show(self):
+        msg = self._sysstat_check()
+        if msg:
+            self.osc.chatbox(msg)
+            self.status(msg)
+        else:
+            self.status("System stats need Windows (or no battery/RAM data).")
+
+    def _toggle_sysstat(self):
+        if self.sysstat_running:
+            self.sysstat_running = False
+            self.ss_btn.config(text="Start")
+            self.status("System status off.")
+            return
+        try:
+            secs = max(30, int(float(self.ss_secs.get())))
+        except ValueError:
+            secs = 60
+
+        def run():
+            self.sysstat_running = True
+            self.ss_btn.config(text="Stop")
+            while self.sysstat_running:
+                msg = self._sysstat_check()
+                if msg:
+                    self.osc.chatbox(msg)
+                for _ in range(secs * 10):
+                    if not self.sysstat_running:
+                        return
+                    time.sleep(0.1)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("System status on (%ds)." % secs)
 
 # ---- Connections tab (talk to the other apps)
 
