@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.4** | |
+| CLOUD DATABASE — avatar vault syncs to a private GitHub repo, access anywhere, any PC | user request |
 | **NEW in 4.3** | |
 | Unlimited local avatar vault — save/equip/delete avatars, no VRChat favorite-slot limit | user request |
 | Login accepts VRChat username OR email | user request |
