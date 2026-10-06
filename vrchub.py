@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.0.0"
+APP_VERSION = "4.1.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -834,6 +834,36 @@ Login failing? VRChat logins with 2FA: use your authenticator app code.
 Full docs: DOCS.md in the GitHub repo.
 """
 
+# Face tracking: MediaPipe blendshape -> VRChat FT parameter (v2/ names)
+FT_MAP = [
+    ("eyeBlinkLeft", "v2/EyeBlinkLeft"),
+    ("eyeBlinkRight", "v2/EyeBlinkRight"),
+    ("jawOpen", "v2/JawOpen"),
+    ("mouthSmileLeft", "v2/MouthSmileLeft"),
+    ("mouthSmileRight", "v2/MouthSmileRight"),
+    ("browInnerUp", "v2/BrowInnerUp"),
+    ("browDownLeft", "v2/BrowDownLeft"),
+    ("browDownRight", "v2/BrowDownRight"),
+    ("mouthOpen", "v2/MouthOpen"),
+    ("eyeSquintLeft", "v2/EyeSquintLeft"),
+    ("eyeSquintRight", "v2/EyeSquintRight"),
+]
+FT_MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/"
+                "face_landmarker/face_landmarker/float16/1/"
+                "face_landmarker.task")
+
+
+def ft_dependencies_ok():
+    """Face tracking is OPTIONAL: needs opencv + mediapipe (pip install).
+    The rest of VRCHub stays stdlib-only."""
+    try:
+        import cv2  # noqa: F401
+        import mediapipe  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 GESTURES = ["Neutral", "Fist", "Open", "Point", "Peace", "RockNRoll",
             "Gun", "ThumbsUp"]
 
@@ -868,6 +898,7 @@ class VRCHubApp(tk.Tk):
         self._last_media_title = ""
         self._media_last_sent = None
         self.clock_running = False
+        self.ft_running = False
         self.cd_running = False
         self._msg_queue = []
         self._queue_thread = None
@@ -913,6 +944,7 @@ class VRCHubApp(tk.Tk):
         self._tab_extras(nb)
         self._tab_connect(nb)
         self._tab_tools(nb)
+        self._tab_face(nb)
         self._tab_help(nb)
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
@@ -2425,6 +2457,141 @@ class VRCHubApp(tk.Tk):
             self.status("Listening on UDP %d." % port)
         except OSError as e:
             self.status("Port %d busy: %s" % (port, e))
+
+    # ---- Face Track tab (optional deps: opencv + mediapipe)
+
+    def _tab_face(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Face Track  ")
+        ttk.Label(f, text="EXPERIMENTAL webcam face tracking. Optional "
+                          "dependencies:\n"
+                          "    pip install opencv-python mediapipe\n"
+                          "Everything else in VRCHub still works without "
+                          "them.\n"
+                          "Params are sent as VRChat FT names (v2/...) - "
+                          "use with a face-tracking-enabled avatar,\n"
+                          "and note VRCFT is the gold standard; this is "
+                          "the cheap path.").grid(row=0, column=0,
+                                                  columnspan=4, sticky="w")
+        self.ft_dep_label = ttk.Label(f, text="Checking dependencies...")
+        self.ft_dep_label.grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(f, text="Camera:").grid(row=2, column=0, sticky="w")
+        self.ft_cam = ttk.Spinbox(f, from_=0, to=4, width=3)
+        self.ft_cam.set(0)
+        self.ft_cam.grid(row=2, column=1, padx=4)
+        self.ft_btn = ttk.Button(f, text="Start", command=self._toggle_ft)
+        self.ft_btn.grid(row=2, column=2, padx=4)
+        self.ft_label = ttk.Label(f, text="")
+        self.ft_label.grid(row=2, column=3)
+        self.ft_log = scrolledtext.ScrolledText(f, height=8, state="disabled",
+                                                font=("Consolas", 9),
+                                                wrap="word")
+        self.ft_log.grid(row=3, column=0, columnspan=4, sticky="ew", pady=6)
+        f.columnconfigure(3, weight=1)
+        self.after(200, self._ft_check_deps)
+
+    def _ft_check_deps(self):
+        if ft_dependencies_ok():
+            self.ft_dep_label.config(
+                text="Dependencies OK (opencv + mediapipe found).")
+            self.ft_dep_ok = True
+        else:
+            self.ft_dep_label.config(
+                text="MISSING: run  pip install opencv-python mediapipe "
+                     "then restart VRCHub.")
+            self.ft_dep_ok = False
+
+    def _toggle_ft(self):
+        if self.ft_running:
+            self.ft_running = False
+            self.ft_btn.config(text="Start")
+            self.status("Face tracking off.")
+            return
+        if not getattr(self, "ft_dep_ok", False):
+            self.status("Install opencv + mediapipe first (see tab).")
+            return
+
+        def work():
+            import cv2
+            import mediapipe as mp
+            from mediapipe.tasks import python as mp_tasks
+            from mediapipe.tasks.python import vision as mp_vision
+
+            model_path = os.path.join(
+                os.path.dirname(os.path.abspath(CONFIG_FILE)),
+                "face_landmarker.task")
+            if not os.path.exists(model_path):
+
+                def dl():
+                    self.status("Downloading face model (~3.7 MB, once)...")
+                self.after(0, dl)
+                try:
+                    urllib.request.urlretrieve(FT_MODEL_URL, model_path)
+                except Exception as e:
+                    self.after(0, lambda: self.status(
+                        "Model download failed: %s" % e.__class__.__name__))
+                    return
+
+            cap = cv2.VideoCapture(int(float(self.ft_cam.get() or 0)))
+            if not cap.isOpened():
+                self.after(0, lambda: self.status(
+                    "Could not open camera."))
+                return
+            self.ft_running = True
+            self.ft_btn.config(text="Stop")
+            self.status("Face tracking running (camera %s)."
+                        % self.ft_cam.get())
+
+            landmarker = mp_vision.FaceLandmarker.create_from_options(
+                mp_vision.FaceLandmarkerOptions(
+                    base_options=mp_tasks.BaseOptions(
+                        model_asset_path=model_path),
+                    output_face_blendshapes=True,
+                    running_mode=mp_vision.RunningMode.VIDEO))
+            t_last = 0
+            sent_any = False
+            while self.ft_running:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                ts = int(time.time() * 1000)
+                if ts == t_last:
+                    time.sleep(0.004)
+                    continue
+                t_last = ts
+                img = mp.Image(image_format=mp.ImageFormat.SRGB,
+                               data=cv2.cvtColor(
+                                   frame, cv2.COLOR_BGR2RGB))
+                result = landmarker.detect_for_video(img, ts)
+                if result.face_blendshapes:
+                    scores = {}
+                    for cat in result.face_blendshapes[0]:
+                        scores[cat.category_name] = cat.score
+                    for src, osc_name in FT_MAP:
+                        v = scores.get(src, 0.0)
+                        self.osc.avatar_param(osc_name, min(1.0, max(0.0, v)))
+                        if v > 0.15:
+                            sent_any = True
+                    if sent_any:
+                        blink = (scores.get("eyeBlinkLeft", 0)
+                                 + scores.get("eyeBlinkRight", 0)) / 2
+                        jaw = scores.get("jawOpen", 0)
+
+                        def upd(b=blink, j=jaw):
+                            self.ft_label.config(
+                                text="blink %.2f  jaw %.2f" % (b, j))
+                        self.after(0, upd)
+                time.sleep(0.02)
+            cap.release()
+            self.ft_running = False
+
+            def done():
+                self.ft_btn.config(text="Start")
+                self.status("Face tracking stopped.")
+            self.after(0, done)
+
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Starting face tracking...")
 
     # ---- Help tab (tutorial)
 
