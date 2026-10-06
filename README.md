@@ -17,6 +17,11 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 3.2 — top-voted user requests from all five apps' GitHub trackers** | |
+| Avatar wear-time tracking | VRCX (7👍) |
+| Avatar memos (your notes per avatar) | VRCX (6👍) |
+| Friend watch — chatbox alert when a friend goes offline / changes world | VRCX (13👍) |
+| Block / mute / unmute buttons (with confirm) | VRCX (5👍) |
 | **NEW in 3.1** | |
 | Multi-account profiles — save/load several VRChat sessions | VRCNext |
 | Pulsoid heart rate (alternative to HypeRate, token at pulsoid.net) | VRCOSC |
