@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.6.0"
+APP_VERSION = "6.6.1"
 
 # VRCNext-style dark palette
 VRN_BG = "#15171c"      # window background
@@ -4925,6 +4925,172 @@ class VRCHubApp(tk.Tk):
         self.diag_text.pack(fill="x")
         ttk.Button(diag, text="Run self-test", width=14,
                    command=self._diagnose).pack(pady=(4, 0))
+        srow = ttk.Frame(diag)
+        srow.pack(fill="x", pady=(4, 0))
+        ttk.Label(srow, text="Base44 token:").pack(side="left")
+        self.b44_tok = ttk.Entry(srow, width=28, show="*")
+        self.b44_tok.insert(0, self.cfg.get("b44_token", ""))
+        self.b44_tok.pack(side="left", padx=4)
+        self.diag_auto = tk.BooleanVar(
+            value=bool(self.cfg.get("diag_auto_send", True)))
+        ttk.Checkbutton(srow, text="auto-send report to my agent",
+                        variable=self.diag_auto).pack(side="left")
+        ttk.Button(srow, text="FULL diagnostic + send", width=21,
+                   command=self._diagnose_full).pack(side="right")
+
+    def _diag_send(self, report):
+        """Send a diagnostic report to Ben's Superagent via Base44 API."""
+        tok = self.b44_tok.get().strip()
+        if not tok:
+            return "no token set"
+        self.cfg["b44_token"] = tok
+        self.cfg["diag_auto_send"] = bool(self.diag_auto.get())
+        save_config(self.cfg)
+        agent_id = "6aa82f8596c86160d511f44c"
+        headers = {"Authorization": "Bearer " + tok,
+                   "Content-Type": "application/json",
+                   "User-Agent": "VRCHub/" + APP_VERSION}
+
+        def work():
+            try:
+                req = urllib.request.Request(
+                    "https://base44.app/api/agents/%s/conversations"
+                    % agent_id, data=json.dumps(
+                        {"title": "VRCHub diagnostic"}).encode(),
+                    headers=headers, method="POST")
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    data = json.loads(r.read().decode("utf-8", "replace"))
+                cid = data.get("id") or data.get("conversation", {}).get(
+                    "id", "")
+                if not cid:
+                    return "no conversation id"
+                req = urllib.request.Request(
+                    "https://base44.app/api/agents/%s/conversations/%s"
+                    "/messages" % (agent_id, cid),
+                    data=json.dumps({
+                        "content": "VRCHub v%s diagnostic report "
+                        "from Ben's PC:\n\n%s"
+                        % (APP_VERSION, "\n".join(report))
+                    }).encode(), headers=headers, method="POST")
+                urllib.request.urlopen(req, timeout=25).read()
+                return "sent"
+            except Exception as ex:
+                return "send failed: " + str(ex)[:80]
+        import queue
+        q = queue.Queue()
+        threading.Thread(target=lambda: q.put(work()), daemon=True
+                        ).start()
+        return "sending"
+
+    def _diagnose_full(self):
+        """Deep test of every feature, then report back the issues."""
+        self.diag_text.config(state="normal")
+        self.diag_text.delete("1.0", "end")
+        self.diag_text.insert("end", "Running FULL diagnostic...\n")
+        self.diag_text.config(state="disabled")
+        lines = []
+
+        def line(msg):
+            lines.append(msg)
+            def put():
+                self.diag_text.config(state="normal")
+                self.diag_text.insert("end", msg + "\n")
+                self.diag_text.see("end")
+                self.diag_text.config(state="disabled")
+            self.after(0, put)
+
+        def work():
+            line("== VRCHub v%s FULL diagnostic ==" % APP_VERSION)
+            # 1. VRChat running
+            vr = False
+            try:
+                if sys.platform == "win32":
+                    out = subprocess.check_output(
+                        ["tasklist", "/FI", "IMAGENAME eq VRChat.exe"],
+                        stderr=subprocess.DEVNULL,
+                        timeout=10).decode("utf-8", "replace")
+                    vr = "VRChat.exe" in out
+                else:
+                    out = subprocess.check_output(
+                        ["ps", "-e"], text=True, timeout=10)
+                    vr = "vrchat" in out.lower()
+                line("[OK] VRChat running" if vr
+                     else "[!!] VRChat NOT running (OSC features idle)")
+            except Exception as ex:
+                line("[??] process check failed: %s" % str(ex)[:50])
+            # 2. OSC port ownership (netstat)
+            try:
+                out = subprocess.check_output(
+                    ["netstat", "-ano", "-p", "UDP"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=10).decode("utf-8", "replace")
+                osc_ok = (":%d " % int(self.cfg["osc_port"])) in out
+                line("[OK] OSC port %d is bound (VRChat OSC on)"
+                     % int(self.cfg["osc_port"]) if osc_ok
+                     else "[!!] port %d not bound - turn on "
+                          "Settings→OSC in VRChat" % int(self.cfg[
+                              "osc_port"]))
+            except Exception:
+                line("[--] OSC port ownership unknown")
+            # 3. config file read/write
+            try:
+                save_config(self.cfg)
+                with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
+                    json.load(fh)
+                line("[OK] config file readable+writable: %s"
+                     % CONFIG_FILE)
+            except Exception as ex:
+                line("[!!] config file problem: %s" % str(ex)[:60])
+            # 4. API session + endpoints
+            try:
+                me = self.api.me()
+                line("[OK] API session: %s" % me.get("displayName", "?"))
+                try:
+                    self.api.friends_online()
+                    line("[OK] API endpoint friends")
+                except Exception as ex:
+                    line("[!!] friends endpoint: %s" % str(ex)[:60])
+                try:
+                    self.api.search_worlds("test")
+                    line("[OK] API endpoint worlds search")
+                except Exception as ex:
+                    line("[!!] worlds endpoint: %s" % str(ex)[:60])
+            except Exception as ex:
+                line("[!!] API session invalid: %s -> run Auto setup"
+                     % str(ex)[:60])
+            # 5. VRChat files
+            paths = self.cfg.get("vrchat_paths") or vrchat_files_scan()
+            line("[OK] VRChat install: %s" % paths["exe"] if paths.get(
+                "exe") else "[!!] VRChat install not found")
+            line("[--] config.json: %s" % ("found" if paths.get("config")
+                                           else "not found"))
+            line("[--] OSC avatar configs: %s" % (
+                "found" if paths.get("osc_cfg_dir") else "not found"))
+            # 6. internet
+            try:
+                urllib.request.urlopen(
+                    "https://api.vrchat.com/api/1/config",
+                    timeout=8).read(64)
+                line("[OK] internet + VRChat API reachable")
+            except Exception as ex:
+                line("[!!] no internet / API blocked: %s" % str(ex)[:60])
+            # 7. local network for phone keyboard
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                line("[OK] LAN IP: %s (phone keyboard address)"
+                     % s.getsockname()[0])
+                s.close()
+            except Exception:
+                line("[!!] no network - phone keyboard unusable")
+            n = sum(1 for l in lines if l.startswith("[!!]"))
+            line("== done: %d issue(s) found ==" % n)
+            if self.diag_auto.get() and self.b44_tok.get().strip():
+                res = self._diag_send(lines)
+                line("report → %s" % res)
+            else:
+                line("report not sent (token empty or auto-send off)")
+        threading.Thread(target=work, daemon=True).start()
 
     def _diagnose(self):
         """Check every feature's requirements and report results."""
