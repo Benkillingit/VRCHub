@@ -91,6 +91,11 @@ Talk to an AI assistant; its replies can be relayed straight into your VRChat ch
 
 Note: AFK counts VRCHub-side activity (messages you send from this app), not keyboard/mouse input.
 
+### VRChat input controls & OSC avatar switch (4.2)
+- Params tab → **VRChat input controls**: official `/input/` endpoints straight from VRChat's OSC docs — Jump, Run (toggle), Walk forward, Voice (toggle), Comfort turn L/R, Drop L/R, Grab R, Use R, Panic. Tap buttons fire a 0.3s pulse; toggles hold.
+- **Panic!** maps to `/input/PanicButton` — VRChat's own emergency reset. Handy when an avatar freaks out.
+- **Switch avatar by ID via OSC**: paste any `avtr_...` ID and hit Switch — changes avatar without logging into the API (VRChat must allow OSC avatar changes, on by default in most builds; see Settings → OSC if nothing happens).
+
 ### Face Track (4.1, experimental)
 - **What it does**: reads your webcam with MediaPipe, estimates face blendshapes, and sends them to VRChat as face-tracking parameters (`v2/EyeBlink*`, `v2/JawOpen`, `v2/MouthSmile*`, brows, squints).
 - **Setup (once)**: `pip install opencv-python mediapipe`. The ~3.7 MB face model downloads automatically on first run.
