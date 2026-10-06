@@ -91,6 +91,14 @@ Talk to an AI assistant; its replies can be relayed straight into your VRChat ch
 
 Note: AFK counts VRCHub-side activity (messages you send from this app), not keyboard/mouse input.
 
+### Saved avatars vault (4.3)
+VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel on the VRChat API tab stores any number of avatars locally (`saved_avatars` in `vrchub_config.json`):
+- **Save selected** — saves the avatar highlighted in your avatar list. No selection? Paste an `avtr_...` ID into the search box and hit Save selected to add it manually.
+- **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
+- **Delete** — removes it from your vault only.
+
+Login note: the **Email or username** field accepts either — VRChat's login takes your VRChat username as well as the email on file.
+
 ### VRChat input controls & OSC avatar switch (4.2)
 - Params tab → **VRChat input controls**: official `/input/` endpoints straight from VRChat's OSC docs — Jump, Run (toggle), Walk forward, Voice (toggle), Comfort turn L/R, Drop L/R, Grab R, Use R, Panic. Tap buttons fire a 0.3s pulse; toggles hold.
 - **Panic!** maps to `/input/PanicButton` — VRChat's own emergency reset. Handy when an avatar freaks out.
