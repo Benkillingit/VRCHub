@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.1.0"
+APP_VERSION = "6.2.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1426,6 +1426,12 @@ class VRCHubApp(tk.Tk):
             self.friends_tree.column(c, width=w)
         self.friends_tree.pack(fill="both", expand=True)
         ttk.Button(fr, text="Load friends", command=self._load_friends).pack(pady=3)
+        frow = ttk.Frame(fr)
+        frow.pack(fill="x")
+        ttk.Button(frow, text="★ Fave selected",
+                   command=self._fave_friend).pack(side="left")
+        ttk.Button(frow, text="Faves online",
+                   command=self._faves_online).pack(side="left", padx=4)
         wrow = ttk.Frame(fr)
         wrow.pack(fill="x", pady=3)
         self.fwatch_btn = ttk.Button(wrow, text="Watch (chatbox alerts)",
@@ -1863,11 +1869,14 @@ class VRCHubApp(tk.Tk):
                     include_offline=self.friends_offline.get())
 
                 def fill():
+                    faves = self.cfg.get("fav_friends", [])
                     self.friends_tree.delete(*self.friends_tree.get_children())
                     for frn in friends:
+                        star = "★ " if frn["id"] in faves else ""
                         self.friends_tree.insert(
                             "", "end", iid=frn["id"] or frn["name"],
-                            values=(frn["name"], frn["status"], frn["world"]))
+                            values=(star + frn["name"], frn["status"],
+                                    frn["world"]))
                     self.status("%d friend(s) online." % len(friends))
                 self.after(0, fill)
             except Exception as e:
@@ -2498,10 +2507,53 @@ class VRCHubApp(tk.Tk):
         panes.rowconfigure(0, weight=1)
         self._current_world_id = None
 
+    def _fave_friend(self):
+        sel = self.friends_tree.selection()
+        if not sel:
+            self.status("Pick a friend first.")
+            return
+        faves = self.cfg.setdefault("fav_friends", [])
+        fid = sel[0]
+        if fid in faves:
+            faves.remove(fid)
+            self.status("Unfaved.")
+        else:
+            faves.append(fid)
+            self.status("Faved.")
+        save_config(self.cfg)
+        self._load_friends()
+
+    def _faves_online(self):
+        def work():
+            try:
+                faves = set(self.cfg.get("fav_friends", []))
+                friends = self.api.friends_online()
+                names = [f["name"] for f in friends if f["id"] in faves
+                         and f["state"] != "offline"]
+                self.after(0, lambda: self.status(
+                    "Faves online: %s" % (", ".join(names) or "none")))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:70]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Checking faves...")
+
     def _search_worlds(self):
         q = self.world_search.get().strip()
         if not q:
             self.status("Type a world name to search.")
+            return
+        m = re.search(r"wrld_[0-9a-fA-F-]+", q)
+        if m:
+            wid = m.group(0)
+
+            def openworld():
+                self.world_tree.delete(*self.world_tree.get_children())
+                self.world_tree.insert("", "end", iid=wid,
+                                        values=("(pasted link)", "", ""))
+                self.status("World ID loaded from link.")
+                self._load_instances()
+            self.after(0, openworld)
+            self.status("Opening world from link...")
             return
 
         def work():
