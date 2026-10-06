@@ -52,10 +52,50 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.2.0"
+APP_VERSION = "5.3.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
+PLUGIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugins")
+
+
+def load_plugins():
+    """Community plugins: any .py in plugins/ with NAME + build()."""
+    import importlib.util
+
+    class _Broken:
+        NAME = "?"
+        VERSION = "?"
+        DESCRIPTION = "failed to load"
+
+        def __init__(self, fn, err):
+            self.NAME = fn
+            self.DESCRIPTION = "FAILED: %s" % str(err)[:80]
+
+        def build(self, app, parent):
+            pass
+
+    plugins = []
+    if not os.path.isdir(PLUGIN_DIR):
+        return plugins
+    for fn in sorted(os.listdir(PLUGIN_DIR)):
+        if (not fn.endswith(".py") or fn.startswith("_")
+                or fn == "example_hello.py"):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "vrchub_plugin_" + fn[:-3], os.path.join(PLUGIN_DIR, fn))
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            if hasattr(mod, "build"):
+                if not hasattr(mod, "NAME"):
+                    mod.NAME = fn[:-3]
+                if not hasattr(mod, "DESCRIPTION"):
+                    mod.DESCRIPTION = "(no description)"
+                plugins.append(mod)
+        except Exception as e:
+            plugins.append(_Broken(fn, e))
+    return plugins
 
 
 # ================================================================ OSC engine
@@ -837,6 +877,16 @@ pip install Pillow tinytuya, then in Extras fill:
 Values save to your local config only. Start = your room
 matches the screen; stop = same button.
 
+COMMUNITY PLUGINS
+---------------------------------------
+Anyone can add features to VRCHub without touching the core:
+drop a .py file in the plugins/ folder, restart or hit
+Rescan in the Plugins tab. Your file needs NAME, a
+build(app, parent) that creates its UI, and optionally
+init(app) and on_osc(app, address, args) hooks. Full guide
++ template: PLUGINS.md in the repo. Plugins are plain
+Python - only install ones you trust (same as VRCOSC mods).
+
 TROUBLESHOOTING
 ---------------
 Nothing appears in-game? In VRChat: Settings > OSC > make sure OSC is
@@ -929,6 +979,12 @@ class VRCHubApp(tk.Tk):
                    % (APP_NAME, APP_VERSION))
         self.geometry("840x600")
         self.minsize(720, 520)
+        self.plugins = load_plugins()
+        for p in self.plugins:
+            try:
+                p.init(self)
+            except Exception:
+                pass
         self._build_ui()
         self._try_session()
 
@@ -960,6 +1016,7 @@ class VRCHubApp(tk.Tk):
         self._tab_worlds(nb)
         self._tab_extras(nb)
         self._tab_connect(nb)
+        self._tab_plugins(nb)
         self._tab_tools(nb)
         self._tab_face(nb)
         self._tab_help(nb)
@@ -3015,6 +3072,57 @@ class VRCHubApp(tk.Tk):
             lst.insert("end", "%-18s %4dh %02dm" % (
                 d["name"][:18], d["min"] // 60, d["min"] % 60))
 
+    # ---- community plugins
+
+    def _tab_plugins(self, nb):
+        f = ttk.Frame(nb, padding=10)
+        nb.add(f, text="  Plugins  ")
+        top = ttk.Frame(f)
+        top.pack(fill="x", pady=(0, 6))
+        ttk.Label(top, text="Community plugins: drop a .py file into the "
+                            "plugins/ folder next to vrchub.py and rescan."
+                  ).pack(side="left")
+        ttk.Button(top, text="Rescan", width=9,
+                   command=self._plugins_rescan).pack(side="left", padx=8)
+        ttk.Label(top, text="See PLUGINS.md to write your own."
+                  ).pack(side="left", padx=6)
+        self.plugin_container = ttk.Frame(f)
+        self.plugin_container.pack(fill="both", expand=True)
+        self._plugins_render()
+
+    def _plugins_render(self):
+        for w in self.plugin_container.winfo_children():
+            w.destroy()
+        if not self.plugins:
+            ttk.Label(self.plugin_container, foreground="#888",
+                      text="No plugins installed yet. Community-made panels "
+                           "would appear here.").pack(pady=20)
+            return
+        for p in self.plugins:
+            fr = ttk.LabelFrame(
+                self.plugin_container,
+                text=" %s %s " % (p.NAME, getattr(p, "VERSION", "")),
+                padding=6)
+            fr.pack(fill="x", pady=4)
+            ttk.Label(fr, text=getattr(p, "DESCRIPTION", ""),
+                      foreground="#888").pack(anchor="w")
+            try:
+                p.build(self, fr)
+            except Exception as e:
+                ttk.Label(fr, foreground="#c66",
+                          text="build() crashed: %s" % str(e)[:70]
+                          ).pack(anchor="w")
+
+    def _plugins_rescan(self):
+        self.plugins = load_plugins()
+        for p in self.plugins:
+            try:
+                p.init(self)
+            except Exception:
+                pass
+        self._plugins_render()
+        self.status("Plugins rescanned: %d loaded." % len(self.plugins))
+
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
         self._ban_frame = tk.Frame(self, bg="#222", height=26)
@@ -3551,6 +3659,13 @@ class VRCHubApp(tk.Tk):
                     return
                 tag = "WORLD " if addr.startswith("/world/") else ""
                 self._log_to(self.osc_log, "%s%s %s" % (tag, addr, args))
+                for p in getattr(self, "plugins", []):
+                    hook = getattr(p, "on_osc", None)
+                    if hook:
+                        try:
+                            hook(self, addr, args)
+                        except Exception:
+                            pass
             self.after(0, show)
 
         try:
