@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -219,6 +219,7 @@ class VRChatAPI:
         out = []
         for f in self._json(text):
             out.append({
+                "id": f.get("id", ""),
                 "name": f.get("displayName", "?"),
                 "status": f.get("status", "?"),
                 "state": f.get("state", "?"),
@@ -303,6 +304,20 @@ class VRChatAPI:
             % (urllib.parse.quote(notif_id), action))
         if status not in (200, 201):
             raise RuntimeError("Notification %s failed: " % action + text[:120])
+
+    def block_user(self, user_id, block=True):
+        action = "PUT" if block else "DELETE"
+        status, text = self._request(
+            action, "/auth/user/blocks/%s" % urllib.parse.quote(user_id))
+        if status not in (200, 201, 204):
+            raise RuntimeError("Block failed: " + text[:120])
+
+    def mute_user(self, user_id, mute=True):
+        action = "PUT" if mute else "DELETE"
+        status, text = self._request(
+            action, "/auth/user/mute/%s" % urllib.parse.quote(user_id))
+        if status not in (200, 201, 204):
+            raise RuntimeError("Mute failed: " + text[:120])
 
     def avatar_favorites(self, limit=30):
         """Favorite avatars with names (VRCX favorite bar)."""
@@ -633,6 +648,8 @@ def load_config():
         ],
         "vrchat_cookies": {},
         "profiles": {},
+        "wear_times": {},
+        "avatar_memos": {},
     }
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -813,6 +830,9 @@ class VRCHubApp(tk.Tk):
         self.last_activity = time.time()
         self.pul_running = False
         self.pul_ws = None
+        self._wear_start = None
+        self.friend_watch_running = False
+        self._friend_states = {}
         self.afk_running = False
         self.watch_running = False
         self.gcycle_running = False
@@ -1046,6 +1066,19 @@ class VRCHubApp(tk.Tk):
             self.friends_tree.column(c, width=w)
         self.friends_tree.pack(fill="both", expand=True)
         ttk.Button(fr, text="Load friends", command=self._load_friends).pack(pady=3)
+        wrow = ttk.Frame(fr)
+        wrow.pack(fill="x", pady=3)
+        self.fwatch_btn = ttk.Button(wrow, text="Watch (chatbox alerts)",
+                                     command=self._toggle_friend_watch)
+        self.fwatch_btn.pack(side="left")
+        for label, cmd in (
+                ("Block", lambda: self._mod_friend("block")),
+                ("Unblock", lambda: self._mod_friend("unblock")),
+                ("Mute", lambda: self._mod_friend("mute")),
+                ("Unmute", lambda: self._mod_friend("unmute"))):
+            ttk.Button(wrow, text=label, width=7,
+                       command=cmd).pack(side="left", padx=2)
+        ttk.Label(wrow, text="select a friend first").pack(side="left", padx=4)
 
         # avatars
         av = ttk.LabelFrame(f, text="Avatars — equip = hot-swap (Nexus-style)",
@@ -1067,6 +1100,17 @@ class VRCHubApp(tk.Tk):
         ttk.Button(row, text="Search public", width=14,
                    command=self._search_avatars).pack(side="left", padx=4)
         ttk.Button(av, text="Equip selected", command=self._equip_avatar).pack()
+        mrow = ttk.Frame(av)
+        mrow.pack(fill="x", pady=(3, 0))
+        ttk.Label(mrow, text="Memo:").pack(side="left")
+        self.av_memo = ttk.Entry(mrow, width=24)
+        self.av_memo.pack(side="left", fill="x", expand=True, padx=4)
+        ttk.Button(mrow, text="Save memo", width=10,
+                   command=self._save_memo).pack(side="left")
+        self.av_wear = ttk.Label(av, text="Wear time: select an avatar")
+        self.av_wear.pack(anchor="w", pady=(2, 0))
+        self.avatar_tree.bind("<<TreeviewSelect>>",
+                              lambda e: self._avatar_selected())
 
         f.columnconfigure(0, weight=1)
         f.columnconfigure(1, weight=1)
@@ -1138,6 +1182,112 @@ class VRCHubApp(tk.Tk):
         except Exception as e:
             self.status("Profile session expired: %s" % str(e)[:60])
 
+    def _avatar_selected(self):
+        sel = self.avatar_tree.selection()
+        if not sel:
+            return
+        av_id = sel[0]
+        self.av_memo.delete(0, "end")
+        self.av_memo.insert(0, (self.cfg.get("avatar_memos") or {}).get(av_id, ""))
+        mins = (self.cfg.get("wear_times") or {}).get(av_id, 0)
+        self.av_wear.config(text="Wear time: %dh %02dm" % (mins // 60, mins % 60))
+
+    def _save_memo(self):
+        sel = self.avatar_tree.selection()
+        if not sel:
+            self.status("Select an avatar first.")
+            return
+        self.cfg.setdefault("avatar_memos", {})[sel[0]] = \
+            self.av_memo.get().strip()
+        save_config(self.cfg)
+        self.status("Memo saved.")
+
+    def _note_equip(self, av_id, name):
+        """Close out the previous wear interval, start a new one
+        (VRCX 'avatar wear times' request, 7+ votes)."""
+        now = time.time()
+        if self._wear_start:
+            old_id, t0 = self._wear_start
+            mins = int((now - t0) // 60)
+            if mins > 0:
+                times = self.cfg.setdefault("wear_times", {})
+                times[old_id] = times.get(old_id, 0) + mins
+        self._wear_start = (av_id, now)
+        save_config(self.cfg)
+        self.status("Equipped '%s' — wear timer running." % name[:40])
+        self._avatar_selected()
+
+    def _toggle_friend_watch(self):
+        """Alert in chatbox when a friend goes offline or moves worlds
+        (VRCX 'notify when favorited friend leaves instance', 13+ votes)."""
+        if self.friend_watch_running:
+            self.friend_watch_running = False
+            self.fwatch_btn.config(text="Watch (chatbox alerts)")
+            self.status("Friend watch off.")
+            return
+
+        def run():
+            self.friend_watch_running = True
+            self.fwatch_btn.config(text="Watching (stop)")
+            first = True
+            while self.friend_watch_running:
+                try:
+                    friends = self.api.friends_online(include_offline=True)
+                except Exception:
+                    time.sleep(60)
+                    continue
+                now_states = {f["name"]: (f["state"], f["world"])
+                              for f in friends}
+                if not first:
+                    for nm, (state, world) in now_states.items():
+                        old = self._friend_states.get(nm)
+                        if old is None:
+                            continue
+                        old_state, old_world = old
+                        if old_state == "online" and state != "online":
+                            self.osc.chatbox("%s went offline" % nm, notify=True)
+                        elif old_state == "online" and state == "online" \
+                                and world != old_world:
+                            self.osc.chatbox("%s changed world" % nm,
+                                             notify=True)
+                self._friend_states = now_states
+                first = False
+                for _ in range(600):
+                    if not self.friend_watch_running:
+                        return
+                    time.sleep(0.1)
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Friend watch on (60s poll).")
+
+    def _mod_friend(self, kind):
+        sel = self.friends_tree.selection()
+        if not sel:
+            self.status("Select a friend first.")
+            return
+        uid = sel[0]
+        name = self.friends_tree.item(sel[0], "values")[0]
+        if not messagebox.askyesno(
+                "Confirm", "%s %s?" % (kind.capitalize(), name)):
+            return
+
+        def work():
+            try:
+                if kind == "block":
+                    self.api.block_user(uid, True)
+                elif kind == "unblock":
+                    self.api.block_user(uid, False)
+                elif kind == "mute":
+                    self.api.mute_user(uid, True)
+                else:
+                    self.api.mute_user(uid, False)
+                self.after(0, lambda: self.status("%s done: %s"
+                                                  % (kind, name)))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:80]))
+        threading.Thread(target=work, daemon=True).start()
+        self.status("%sing %s..." % (kind, name))
+
     def _load_friends(self):
         def work():
             try:
@@ -1147,8 +1297,9 @@ class VRCHubApp(tk.Tk):
                 def fill():
                     self.friends_tree.delete(*self.friends_tree.get_children())
                     for frn in friends:
-                        self.friends_tree.insert("", "end", values=(
-                            frn["name"], frn["status"], frn["world"]))
+                        self.friends_tree.insert(
+                            "", "end", iid=frn["id"] or frn["name"],
+                            values=(frn["name"], frn["status"], frn["world"]))
                     self.status("%d friend(s) online." % len(friends))
                 self.after(0, fill)
             except Exception as e:
@@ -1205,8 +1356,8 @@ class VRCHubApp(tk.Tk):
         def work():
             try:
                 self.api.equip_avatar(av_id)
-                self.after(0, lambda: self.status("Avatar equipped — should "
-                                                  "hot-swap in-game."))
+                name = self.avatar_tree.item(av_id, "values")[0]
+                self.after(0, lambda: self._note_equip(av_id, name))
             except Exception as e:
                 self.after(0, lambda: self.status(str(e)[:80]))
         threading.Thread(target=work, daemon=True).start()
