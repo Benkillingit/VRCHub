@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.2** | |
+| Chatbox animations (wave/bounce/typewriter/pulse), per-avatar param profiles, accept/hide invites + friend requests, time-spent-with-friends tracker | ecosystem sweep |
 | **NEW in 5.1** | |
 | Lyrics in chatbox (LRCLIB sync), social status presets, live VRChat server-status check, activity heatmap (day x hour) | ecosystem sweep |
 | **NEW in 5.0** | |
