@@ -2,7 +2,64 @@
 
 **Your VRChat toolkit in one place.** A single-file, stdlib-only Python app that takes the feature set of VRCX, VRCNext, VRC-NEXUS, VRCOSC and MagicChatbox and combines it into one lightweight window. No dependencies, no installer.
 
-## Feature map — where each feature comes from
+## Features by category
+
+<details open><summary><b>Chat & communication</b></summary>
+
+- Chatbox with typing indicator, quick replies, scheduled messages (VRCOSC / MagicChatbox)
+- Mic-to-chatbox dictation + speech translation (Windows built-in speech)
+- Auto-translate typed messages (8 languages, free, no key)
+- Phone keyboard — type on your phone into VRChat (local web page)
+- Media now-playing (Spotify/window title), lyrics sync, Twitch chat relay, AI relay chat
+- AFK auto-responder, cycling message lines, status presets
+
+</details>
+
+<details><summary><b>Avatar & parameters</b></summary>
+
+- My avatars list + one-click hot-swap equip; public avatar search
+- Avatar vault: wear-time tracking + memos, cloud-synced to your private GitHub repo
+- Parameter control (bool/int/float), gesture quick-fire, param presets, param smoothing
+- Rules engine: IF param =/>/< value THEN chatbox or param action
+- World OSC console (Udon parameters), OSC router echo
+
+</details>
+
+<details><summary><b>Social & presence</b></summary>
+
+- VRChat login (username/password + TOTP 2FA), online friends with status + world
+- Friend join/leave alerts (chatbox + VRCX relay), favorite-friend status
+- Block/mute tools, Discord Rich Presence
+- Face tracking (webcam -> VRChat FT params; optional opencv + mediapipe)
+
+</details>
+
+<details><summary><b>Hardware & smart home</b></summary>
+
+- HypeRate heart rate -> chatbox (WebSocket)
+- Ambilight: screen light sync for Tuya bulbs (optional Pillow + tinytuya)
+- Dynamic UI color-shifting
+
+</details>
+
+<details><summary><b>Desktop & convenience</b></summary>
+
+- Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all
+- Hardware stats in chatbox, stopwatch, banner slot, movement nudge sliders
+- Manual-only update check (never phones home), one-click installers (install.bat / install.sh)
+
+</details>
+
+<details><summary><b>Extend it</b></summary>
+
+- Plugin system: drop a .py in plugins/, get a new panel (see PLUGINS.md)
+- Config lives in vrchub_config.json; DOCS.md covers everything
+
+</details>
+
+<details><summary><b>Full version history (changelog)</b></summary>
+
+### Feature map — where each feature comes from
 
 | VRCHub feature | From |
 |---|---|
@@ -88,6 +145,8 @@
 | AI Chat with relay to chatbox (ghost persona) | Bas44 NPC project |
 
 The full apps stay separate installs (they're excellent — this hub covers the parts you use daily in one window).
+
+</details>
 
 ## Install (Windows)
 
