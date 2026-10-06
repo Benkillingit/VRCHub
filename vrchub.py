@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.5.2"
+APP_VERSION = "6.6.0"
 
 # VRCNext-style dark palette
 VRN_BG = "#15171c"      # window background
@@ -4917,6 +4917,98 @@ class VRCHubApp(tk.Tk):
         self.upd_label.pack(side="left", padx=8)
         ttk.Button(row, text="Check for updates now", width=21,
                    command=self._check_updates).pack(side="left")
+        diag = ttk.LabelFrame(f, text="Self-test (why does a feature "
+                                 "not work?)", padding=6)
+        diag.pack(fill="x", pady=(8, 0))
+        self.diag_text = tk.Text(diag, height=10, wrap="word",
+                                 font=("Consolas", 9))
+        self.diag_text.pack(fill="x")
+        ttk.Button(diag, text="Run self-test", width=14,
+                   command=self._diagnose).pack(pady=(4, 0))
+
+    def _diagnose(self):
+        """Check every feature's requirements and report results."""
+        self.diag_text.config(state="normal")
+        self.diag_text.delete("1.0", "end")
+        self.diag_text.insert("end", "Running self-test...\n")
+        self.diag_text.config(state="disabled")
+
+        def line(msg):
+            def put():
+                self.diag_text.config(state="normal")
+                self.diag_text.insert("end", msg + "\n")
+                self.diag_text.see("end")
+                self.diag_text.config(state="disabled")
+            self.after(0, put)
+
+        def work():
+            line("== VRCHub v%s self-test ==" % APP_VERSION)
+            # 1. VRChat process
+            vr = False
+            try:
+                if sys.platform == "win32":
+                    out = subprocess.check_output(
+                        ["tasklist", "/FI", "IMAGENAME eq VRChat.exe"],
+                        stderr=subprocess.DEVNULL,
+                        timeout=10).decode("utf-8", "replace")
+                    vr = "VRChat.exe" in out
+                else:
+                    out = subprocess.check_output(
+                        ["ps", "-e"], text=True, timeout=10)
+                    vr = "vrchat" in out.lower()
+                line("[OK] VRChat running" if vr
+                     else "[!!] VRChat NOT running - start it for "
+                          "OSC features")
+            except Exception as ex:
+                line("[??] Could not check process: %s" % str(ex)[:50])
+            # 2. OSC port
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(2)
+                s.sendto(b"/ping", (self.osc.host, self.osc.port))
+                s.close()
+                line("[OK] OSC target %s:%d reachable (UDP is "
+                     "fire-and-forget)" % (self.osc.host,
+                                           self.osc.port))
+            except Exception as ex:
+                line("[!!] OSC send failed: %s" % str(ex)[:60])
+            # 3. API session
+            try:
+                me = self.api.me()
+                line("[OK] API session valid: %s"
+                     % me.get("displayName", "?"))
+            except Exception as ex:
+                line("[!!] API session invalid: %s  -> use Auto setup "
+                     "on the VRChat API tab" % str(ex)[:60])
+            # 4. VRChat files
+            paths = self.cfg.get("vrchat_paths") or vrchat_files_scan()
+            if paths.get("exe"):
+                line("[OK] VRChat install: %s" % paths["exe"])
+            else:
+                line("[!!] VRChat install not found")
+            if paths.get("config"):
+                line("[OK] config.json found (auto-login available)")
+            if paths.get("osc_cfg_dir"):
+                line("[OK] OSC avatar configs found")
+            # 5. Phone server
+            if getattr(self, "_phone_srv", None):
+                line("[OK] Phone keyboard server running on :8756")
+            else:
+                line("[--] Phone keyboard not started (optional)")
+            # 6. Internet / API reachable
+            try:
+                urllib.request.urlopen(
+                    "https://api.vrchat.com/api/1/config", timeout=8
+                    ).read(64)
+                line("[OK] Internet + VRChat API reachable")
+            except Exception as ex:
+                line("[!!] Cannot reach VRChat API: %s" % str(ex)[:60])
+            # 7. Saved data
+            n_av = len(self.cfg.get("saved_avatars") or [])
+            line("[OK] Saved avatars: %d | config: %s"
+                 % (n_av, CONFIG_FILE))
+            line("== done - [!!] items above are what to fix ==")
+        threading.Thread(target=work, daemon=True).start()
 
     def _vault_export(self):
         fn = filedialog.asksaveasfilename(defaultextension=".json",
