@@ -17,6 +17,9 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.6** | |
+| Desktop overlay — always-on-top mini window (clock, status, quick chatbox send) | MagicChatbox-style |
+| Remaining official input endpoints (Spin, QuickMenu toggle) + VR compatibility notes | VRChat OSC |
 | **NEW in 4.5** | |
 | Search ALL sources — one search across VRChat public DB (popularity sort), your avatars, local vault + cloud vault | user request |
 | **NEW in 4.4** | |
