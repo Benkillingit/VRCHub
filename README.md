@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.3** | |
+| Community plugin system — anyone can add features: drop a .py in plugins/, panel appears in a Plugins tab; PLUGINS.md guide + template for contributors | user request |
 | **NEW in 5.2** | |
 | Chatbox animations (wave/bounce/typewriter/pulse), per-avatar param profiles, accept/hide invites + friend requests, time-spent-with-friends tracker | ecosystem sweep |
 | **NEW in 5.1** | |
