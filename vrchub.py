@@ -52,7 +52,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.9.0"
+APP_VERSION = "5.0.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -2933,9 +2933,28 @@ class VRCHubApp(tk.Tk):
         ttk.Label(ol, text="(chatbox/params events typed via VRCX, VRCOSC or "
                             "MagicChatbox show up here)").grid(
             row=0, column=3, sticky="w", padx=8)
+        self._world_only = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ol, text="Only /world/ messages",
+                        variable=self._world_only).grid(
+                            row=0, column=4, sticky="w")
         self.osc_log = scrolledtext.ScrolledText(ol, height=8, state="disabled",
                                                  font=("Consolas", 9), wrap="word")
-        self.osc_log.grid(row=1, column=0, columnspan=4, sticky="ew", pady=4)
+        self.osc_log.grid(row=1, column=0, columnspan=5, sticky="ew", pady=4)
+        self.osc_log.bind("<Double-Button-1>", self._world_msg_click)
+        wc = ttk.Frame(ol)
+        wc.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(2, 0))
+        ttk.Label(wc, text="World send:").pack(side="left")
+        self.world_addr = ttk.Entry(wc, width=18)
+        self.world_addr.insert(0, "/world/")
+        self.world_addr.pack(side="left", padx=4)
+        ttk.Label(wc, text="Value:").pack(side="left")
+        self.world_val = ttk.Entry(wc, width=12)
+        self.world_val.pack(side="left", padx=4)
+        ttk.Button(wc, text="Send to world", width=13,
+                   command=self._world_send).pack(side="left", padx=4)
+        ttk.Label(wc, text="(Popcorn Palace-style worlds: watch the log, "
+                           "double-click a /world/ line to load it)").pack(
+                               side="left", padx=6)
         f.columnconfigure(0, weight=1)
         vx.columnconfigure(0, weight=1)
         ol.columnconfigure(0, weight=1)
@@ -3046,6 +3065,42 @@ class VRCHubApp(tk.Tk):
                     self.osc.chatbox("%s joined" % text, notify=True)
         self.after(0, show)
 
+    def _world_msg_click(self, event):
+        """Double-click a log line -> load its address into world send."""
+        try:
+            idx = self.osc_log.index("insert linestart")
+            line = self.osc_log.get(idx, idx + " lineend")
+        except tk.TclError:
+            return
+        parts = line.split()
+        for p in parts:
+            if p.startswith("/"):
+                self.world_addr.delete(0, "end")
+                self.world_addr.insert(0, p)
+                self.status("Loaded %s into world send." % p)
+                return
+
+    def _world_send(self):
+        """Send an arbitrary OSC message to a Udon world (OSC for Udon).
+        Worlds like Popcorn Palace expose /world/... addresses."""
+        addr = self.world_addr.get().strip()
+        raw = self.world_val.get().strip()
+        if not addr.startswith("/"):
+            self.status("World address must start with /")
+            return
+        try:
+            if raw == "":
+                self.osc.send(addr)
+            elif raw.lower() in ("true", "false"):
+                self.osc.send(addr, raw.lower() == "true")
+            elif "." in raw or "e" in raw.lower():
+                self.osc.send(addr, float(raw))
+            else:
+                self.osc.send(addr, int(raw))
+        except ValueError:
+            self.osc.send(addr, raw)  # treat as string
+        self.status("Sent %s %s" % (addr, raw or "(no args)"))
+
     def _toggle_osc_listener(self):
         if self.osc_listening:
             self.osc_listener.stop()
@@ -3060,7 +3115,12 @@ class VRCHubApp(tk.Tk):
 
         def on_event(addr, args):
             def show():
-                self._log_to(self.osc_log, "%s %s" % (addr, args))
+                if (getattr(self, "_world_only", None)
+                        and self._world_only.get()
+                        and not addr.startswith("/world/")):
+                    return
+                tag = "WORLD " if addr.startswith("/world/") else ""
+                self._log_to(self.osc_log, "%s%s %s" % (tag, addr, args))
             self.after(0, show)
 
         try:
