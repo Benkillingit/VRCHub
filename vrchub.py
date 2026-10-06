@@ -53,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.8.0"
+APP_VERSION = "5.9.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -280,7 +280,8 @@ class VRChatAPI:
         for a in self._json(text):
             out.append({"id": a.get("id"), "name": a.get("name", "?"),
                         "author": a.get("authorName", ""),
-                        "desc": (a.get("description") or "")[:80]})
+                        "desc": (a.get("description") or "")[:80],
+                        "plat": a.get("supportedPlatforms") or ""})
         return out
 
     def search_public_avatars(self, query):
@@ -327,6 +328,127 @@ class VRChatAPI:
                 out.append({"location": ins.get("location", "?"),
                             "occupants": ins.get("occupantCount", 0)})
         return d.get("name", "?"), d.get("id", world_id), out
+
+    def update_profile(self, **kw):
+        """Change status / bio / pronouns / languages (VRCNext parity)."""
+        me = self.me()
+        body = {}
+        for k, v in kw.items():
+            if v not in (None, ""):
+                body[k] = v
+        if not body:
+            raise RuntimeError("Nothing to update.")
+        status, text = self._request("PUT", "/users/%s" % me.get("id"),
+                                     data=body)
+        if status not in (200, 201):
+            raise RuntimeError("Update failed: " + text[:120])
+        return self._json(text)
+
+    def send_message(self, user_id, msg, mtype="message"):
+        """VRChat messenger (message / inviteMessage / responseMessage /
+        requestInvite)."""
+        status, text = self._request("POST", "/users/%s/message" % user_id,
+                                     data={"message": msg, "type": mtype})
+        if status not in (200, 201):
+            raise RuntimeError("Send failed: " + text[:120])
+        return self._json(text)
+
+    def create_instance(self, world_id, type_="public"):
+        status, text = self._request("POST", "/instances",
+                                     data={"worldId": world_id,
+                                           "type": type_, "region": "us"})
+        if status not in (200, 201):
+            raise RuntimeError("Create failed: " + text[:120])
+        d = self._json(text)
+        return d.get("id") or d.get("location") or d.get("instanceId") or "?"
+
+    def self_invite(self, instance_id):
+        status, text = self._request(
+            "POST", "/instances/%s/invite" % urllib.parse.quote(instance_id))
+        if status not in (200, 201):
+            raise RuntimeError("Self-invite failed: " + text[:120])
+        return self._json(text)
+
+    def invite(self, user_id, instance_id):
+        status, text = self._request("POST", "/invite/%s" % user_id,
+                                     data={"instanceId": instance_id})
+        if status not in (200, 201):
+            raise RuntimeError("Invite failed: " + text[:120])
+        return self._json(text)
+
+    def instance_players(self, instance_id):
+        status, text = self._request(
+            "GET", "/instances/%s" % urllib.parse.quote(instance_id))
+        if status != 200:
+            raise RuntimeError("Instance lookup failed: " + text[:120])
+        d = self._json(text)
+        return [u.get("displayName", "?") for u in d.get("users", [])]
+
+    def unfriend(self, user_id):
+        status, text = self._request(
+            "DELETE", "/auth/user/friends/%s" % user_id)
+        if status not in (200, 201):
+            raise RuntimeError("Unfriend failed: " + text[:120])
+        return self._json(text)
+
+    def friend_request(self, user_id):
+        status, text = self._request("POST", "/friendrequests",
+                                     data={"userId": user_id})
+        if status not in (200, 201):
+            raise RuntimeError("Request failed: " + text[:120])
+        return self._json(text)
+
+    def friend_status(self, user_id):
+        status, text = self._request("GET", "/users/%s/friendStatus" % user_id)
+        if status != 200:
+            raise RuntimeError("Status failed: " + text[:120])
+        return self._json(text)
+
+    def my_groups(self):
+        uid = self.me().get("id")
+        status, text = self._request("GET", "/groups/%s/joined?n=100" % uid)
+        if status != 200:
+            raise RuntimeError("Groups failed: " + text[:120])
+        return [g.get("name", "?") for g in self._json(text)]
+
+    def search_groups(self, query):
+        status, text = self._request(
+            "GET", "/groups?query=%s&n=20" % urllib.parse.quote(query))
+        if status != 200:
+            raise RuntimeError("Group search failed: " + text[:120])
+        return [g.get("name", "?") for g in self._json(text)]
+
+    def join_group(self, gid):
+        status, text = self._request("POST", "/groups/%s/join" % gid)
+        if status not in (200, 201):
+            raise RuntimeError("Join failed: " + text[:120])
+        return self._json(text)
+
+    def leave_group(self, gid):
+        status, text = self._request("POST", "/groups/%s/leave" % gid)
+        if status not in (200, 201):
+            raise RuntimeError("Leave failed: " + text[:120])
+        return self._json(text)
+
+    def gallery_list(self, kind):
+        if kind == "photos":
+            status, text = self._request("GET", "/gallery?n=100")
+            if status != 200:
+                raise RuntimeError("Gallery failed: " + text[:120])
+            return [(g.get("id"), g.get("name", "photo")) for g in
+                    self._json(text)]
+        status, text = self._request(
+            "GET", "/files?tag=%s&n=100" % kind)
+        if status != 200:
+            raise RuntimeError("List failed: " + text[:120])
+        return [(f.get("id"), f.get("name", kind)) for f in
+                self._json(text)]
+
+    def delete_file(self, file_id):
+        status, text = self._request("DELETE", "/file/%s" % file_id)
+        if status not in (200, 201):
+            raise RuntimeError("Delete failed: " + text[:120])
+        return self._json(text)
 
     def notifications(self):
         status, text = self._request(
@@ -677,6 +799,9 @@ DEFAULT_TOOLS = {
     "VRCX":         ["VRCX.exe", ["vrcx"]],
     "VRCOSC":       ["VRCOSC.exe", ["vrcosc"]],
     "MagicChatbox": ["MagicChatbox.exe", ["magicchatbox"]],
+    "SlimeVR":      ["SlimeVR.exe", ["slimevr"]],
+    "VRCVideoCacher": ["VRCVideoCacher.exe", ["videocacher"]],
+    "VRCFaceTracking": ["VRCFaceTracking.exe", ["facetracking"]],
 }
 
 
@@ -1021,6 +1146,7 @@ class VRCHubApp(tk.Tk):
         self._tab_tools(nb)
         self._tab_face(nb)
         self._tab_help(nb)
+        self._tab_vrcn(nb)
         self.nb = nb
         menubar = tk.Menu(self)
         categories = {
@@ -1028,7 +1154,7 @@ class VRCHubApp(tk.Tk):
                             ("Media & Chat", 4)],
             "Avatar & Params": [("VRChat API", 2), ("Avatar Params", 3),
                                 ("Worlds", 5), ("Face Track", 9)],
-            "Social & Presence": [("Connections", 8)],
+            "Social & Presence": [("Connections", 8), ("VRCNext+", 12)],
             "Hardware & Home": [("Extras", 6)],
             "Desktop & Tools": [("Launcher", 11)],
             "Extend & Help": [("Plugins", 7), ("Help", 10)],
@@ -1738,6 +1864,13 @@ class VRCHubApp(tk.Tk):
         def work():
             try:
                 avatars = self.api.my_avatars()
+                try:
+                    cur = self.api.me().get("currentAvatar")
+                    if isinstance(cur, dict):
+                        cur = cur.get("id", "")
+                except Exception:
+                    cur = ""
+                self._cur_avatar_id = cur
 
                 def fill():
                     self._fill_avatars(avatars)
@@ -1750,9 +1883,14 @@ class VRCHubApp(tk.Tk):
 
     def _fill_avatars(self, avatars):
         self.avatar_tree.delete(*self.avatar_tree.get_children())
+        cur = getattr(self, "_cur_avatar_id", "")
         for a in avatars:
+            plat = a.get("plat", "")
+            tag = {"standalone": "Quest", "pc": "PC"}.get(plat, plat or "PC")
+            name = a["name"] + (" [CURRENT]" if a["id"] == cur else "")
             self.avatar_tree.insert("", "end", iid=a["id"],
-                                    values=(a["name"], a["author"]))
+                                    values=(name, a["author"] + " (" + tag
+                                            + ")"))
 
     def _search_avatars(self):
         q = self.av_search.get().strip()
@@ -4348,6 +4486,304 @@ class VRCHubApp(tk.Tk):
         self.upd_label.pack(side="left", padx=8)
         ttk.Button(row, text="Check for updates now", width=21,
                    command=self._check_updates).pack(side="left")
+
+    # ---- VRCNext parity tab
+
+    def _vrcn_id(self, name):
+        """Accept a friend ID or a display name (resolve via friends)."""
+        n = name.strip()
+        if not n:
+            return ""
+        if n.startswith("usr_"):
+            return n
+        try:
+            for f in self.api.friends_online(include_offline=True):
+                if f["name"].lower() == n.lower():
+                    return f["id"]
+        except Exception:
+            pass
+        return n
+
+    def _vrcn_go(self, fn, *a):
+        def work():
+            try:
+                out = fn(*a)
+                self.after(0, lambda: self._vrcn_log(str(out)[:400]))
+            except Exception as e:
+                self.after(0, lambda: self._vrcn_log("ERR: %s" % str(e)[:150]))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _vrcn_log(self, msg):
+        if not hasattr(self, "vrcn_log"):
+            self.status(str(msg)[:120])
+            return
+        self.vrcn_log.config(state="normal")
+        self.vrcn_log.insert("end", time.strftime("[%H:%M] ") + msg + "\n")
+        self.vrcn_log.see("end")
+        if int(self.vrcn_log.index("end-1c").split(".")[0]) > 400:
+            self.vrcn_log.delete("1.0", "20.0")
+        self.vrcn_log.config(state="disabled")
+
+    def _vrcn_profile(self):
+        langs = [x.strip() for x in self.vrcn_langs.get().split(",")
+                 if x.strip()]
+        self._vrcn_go(self.api.update_profile,
+                      status=self.vrcn_status.get(),
+                      statusDescription=self.vrcn_status_text.get(),
+                      bio=self.vrcn_bio.get("1.0", "end").strip(),
+                      pronouns=self.vrcn_pronouns.get(),
+                      languages=langs)
+        self._vrcn_log("Saving profile...")
+
+    def _vrcn_stats(self):
+        if not hasattr(self, "_stats_on") :
+            self._stats_on = False
+        if not self.stats_on.get():
+            return
+
+        def work():
+            while True:
+                time.sleep(300)
+                if not getattr(self, "stats_on", None) or \
+                        not self.stats_on.get():
+                    continue
+                try:
+                    me = self.api.me()
+                    loc = me.get("presence", {}).get("world", "offline")
+                    wt = self.cfg.setdefault("world_time", {})
+                    ft = self.cfg.setdefault("friend_time", {})
+                    if loc and loc != "offline" and loc != "traveling":
+                        wt[loc] = wt.get(loc, 0) + 5
+                    for f in self.api.friends_online():
+                        if f["world"] == loc and loc != "offline":
+                            ft[f["name"]] = ft.get(f["name"], 0) + 5
+                    tl = self.cfg.setdefault("timeline", [])
+                    last = tl[-1].split("->")[-1].strip() if tl else ""
+                    if loc != last:
+                        tl.append(time.strftime("%m-%d %H:%M ->") + " " + loc)
+                        self.cfg["timeline"] = tl[-200:]
+                        self.after(0, lambda: self._vrcn_log(
+                            "Timeline: now in %s" % loc))
+                    save_config(self.cfg)
+                except Exception:
+                    pass
+        threading.Thread(target=work, daemon=True).start()
+        self._vrcn_log("Playtime stats every 5 min (worlds + friends).")
+
+    def _vrcn_show_stats(self):
+        wt = sorted(self.cfg.get("world_time", {}).items(), key=lambda x: -x[1])
+        ft = sorted(self.cfg.get("friend_time", {}).items(), key=lambda x: -x[1])
+        self._vrcn_log("TOP WORLDS (min): %s" % (
+            ", ".join("%s=%d" % (k[-12:], v) for k, v in wt[:5]) or "none"))
+        self._vrcn_log("TOP FRIENDS (min with you): %s" % (
+            ", ".join("%s=%d" % (k, v) for k, v in ft[:5]) or "none"))
+
+    def _tab_vrcn(self, nb):
+        f = ttk.Frame(nb, padding=8)
+        nb.add(f, text="  VRCNext+  ")
+
+        pf = ttk.LabelFrame(f, text="Profile (status / bio / pronouns / "
+                                    "languages)", padding=6)
+        pf.grid(row=0, column=0, sticky="ew", pady=2)
+        ttk.Label(pf, text="Status:").pack(side="left")
+        self.vrcn_status = ttk.Combobox(pf, width=9, state="readonly",
+            values=("active", "join me", "ask me", "busy"))
+        self.vrcn_status.set("active"); self.vrcn_status.pack(side="left", padx=3)
+        ttk.Label(pf, text="Status text:").pack(side="left")
+        self.vrcn_status_text = ttk.Entry(pf, width=18)
+        self.vrcn_status_text.pack(side="left", padx=3)
+        ttk.Label(pf, text="Pronouns:").pack(side="left")
+        self.vrcn_pronouns = ttk.Entry(pf, width=8)
+        self.vrcn_pronouns.pack(side="left", padx=3)
+        ttk.Label(pf, text="Langs:").pack(side="left")
+        self.vrcn_langs = ttk.Entry(pf, width=12)
+        self.vrcn_langs.pack(side="left", padx=3)
+        ttk.Button(pf, text="Apply", command=self._vrcn_profile).pack(
+            side="left", padx=6)
+        pf2 = ttk.Frame(pf); pf2.pack(fill="x", pady=(4, 0))
+        ttk.Label(pf2, text="Bio:").pack(side="left")
+        self.vrcn_bio = tk.Text(pf2, height=2, width=70)
+        self.vrcn_bio.pack(side="left", padx=3)
+
+        ms = ttk.LabelFrame(f, text="Messenger (VRChat invite/response "
+                                    "messages - do not spam, rate limited)",
+                            padding=6)
+        ms.grid(row=1, column=0, sticky="ew", pady=2)
+        ttk.Label(ms, text="Friend:").pack(side="left")
+        self.vrcn_msg_to = ttk.Entry(ms, width=16)
+        self.vrcn_msg_to.pack(side="left", padx=3)
+        self.vrcn_msg_type = ttk.Combobox(ms, width=13, state="readonly",
+            values=("message", "inviteMessage", "responseMessage",
+                    "requestInvite"))
+        self.vrcn_msg_type.set("inviteMessage")
+        self.vrcn_msg_type.pack(side="left", padx=3)
+        ttk.Label(ms, text="Text:").pack(side="left")
+        self.vrcn_msg = ttk.Entry(ms, width=26)
+        self.vrcn_msg.pack(side="left", padx=3)
+        ttk.Button(ms, text="Send",
+                   command=lambda: self._vrcn_go(
+                       self.api.send_message,
+                       self._vrcn_id(self.vrcn_msg_to.get()),
+                       self.vrcn_msg.get().strip(),
+                       self.vrcn_msg_type.get())
+                   ).pack(side="left", padx=6)
+
+        iv = ttk.LabelFrame(f, text="Instances & invites (create instance, "
+                                    "invite friends / yourself, see who is "
+                                    "with you)", padding=6)
+        iv.grid(row=2, column=0, sticky="ew", pady=2)
+        r1 = ttk.Frame(iv); r1.pack(fill="x")
+        ttk.Label(r1, text="World ID:").pack(side="left")
+        self.vrcn_world = ttk.Entry(r1, width=20)
+        self.vrcn_world.pack(side="left", padx=3)
+        self.vrcn_itype = ttk.Combobox(r1, width=8, state="readonly",
+                                       values=("public", "hidden", "friends"))
+        self.vrcn_itype.set("public"); self.vrcn_itype.pack(side="left", padx=3)
+
+        def _create():
+            iid = self.api.create_instance(self.vrcn_world.get().strip(),
+                                           self.vrcn_itype.get())
+            self._vrcn_log("Instance: %s" % iid)
+            self.vrcn_inst = iid
+        ttk.Button(r1, text="Create instance",
+                   command=lambda: self._vrcn_go(_create)).pack(side="left",
+                                                                padx=4)
+        self.vrcn_inst = ""
+        r2 = ttk.Frame(iv); r2.pack(fill="x", pady=(4, 0))
+        ttk.Label(r2, text="Friend:").pack(side="left")
+        self.vrcn_invitee = ttk.Entry(r2, width=16)
+        self.vrcn_invitee.pack(side="left", padx=3)
+        ttk.Label(r2, text="Instance:").pack(side="left")
+        self.vrcn_inst_e = ttk.Entry(r2, width=22)
+        self.vrcn_inst_e.pack(side="left", padx=3)
+        ttk.Button(r2, text="Invite friend",
+                   command=lambda: self._vrcn_go(
+                       self.api.invite,
+                       self._vrcn_id(self.vrcn_invitee.get()),
+                       self.vrcn_inst_e.get().strip()
+                       or self.vrcn_inst)).pack(side="left", padx=4)
+        ttk.Button(r2, text="Invite me (self)",
+                   command=lambda: self._vrcn_go(
+                       self.api.self_invite,
+                       self.vrcn_inst_e.get().strip()
+                       or self.vrcn_inst)).pack(side="left", padx=4)
+
+        def _who():
+            me = self.api.me()
+            loc = me.get("presence", {}).get("world", "")
+            if not loc or loc == "offline":
+                self._vrcn_log("You are not in an instance.")
+                return
+            names = self.api.instance_players(loc)
+            self._vrcn_log("In your instance: %s" % ", ".join(names))
+        ttk.Button(r2, text="Who is with me",
+                   command=lambda: self._vrcn_go(_who)).pack(side="left",
+                                                             padx=4)
+        r3 = ttk.Frame(iv); r3.pack(fill="x", pady=(4, 0))
+        ttk.Label(r3, text="Join friend:").pack(side="left")
+        self.vrcn_joinfriend = ttk.Entry(r3, width=16)
+        self.vrcn_joinfriend.pack(side="left", padx=3)
+
+        def _joinfriend():
+            fid = self._vrcn_id(self.vrcn_joinfriend.get())
+            for f in self.api.friends_online():
+                if f["id"] == fid and f["world"] not in ("offline",
+                                                         "traveling"):
+                    self.api.self_invite(f["world"])
+                    self._vrcn_log("Self-invited to %s's world." % f["name"])
+                    return
+            self._vrcn_log("Friend not found / offline.")
+        ttk.Button(r3, text="Join their world",
+                   command=lambda: self._vrcn_go(_joinfriend)).pack(
+            side="left", padx=4)
+
+        fr = ttk.LabelFrame(f, text="Friend tools (request / unfriend / "
+                                    "mutuals)", padding=6)
+        fr.grid(row=3, column=0, sticky="ew", pady=2)
+        ttk.Label(fr, text="User:").pack(side="left")
+        self.vrcn_friend = ttk.Entry(fr, width=16)
+        self.vrcn_friend.pack(side="left", padx=3)
+        ttk.Button(fr, text="Friend request",
+                   command=lambda: self._vrcn_go(
+                       self.api.friend_request,
+                       self._vrcn_id(self.vrcn_friend.get()))).pack(
+            side="left", padx=4)
+        ttk.Button(fr, text="Unfriend",
+                   command=lambda: self._vrcn_go(
+                       self.api.unfriend,
+                       self._vrcn_id(self.vrcn_friend.get()))).pack(
+            side="left", padx=4)
+        ttk.Button(fr, text="Mutuals",
+                   command=lambda: self._vrcn_go(
+                       self.api.friend_status,
+                       self._vrcn_id(self.vrcn_friend.get()))).pack(
+            side="left", padx=4)
+
+        gr = ttk.LabelFrame(f, text="Groups (list / search / join / leave)",
+                            padding=6)
+        gr.grid(row=4, column=0, sticky="ew", pady=2)
+        ttk.Button(gr, text="My groups",
+                   command=lambda: self._vrcn_go(
+                       lambda: ", ".join(self.api.my_groups()) or "none")
+                   ).pack(side="left")
+        ttk.Label(gr, text="Search:").pack(side="left", padx=(6, 0))
+        self.vrcn_gsearch = ttk.Entry(gr, width=14)
+        self.vrcn_gsearch.pack(side="left", padx=3)
+        ttk.Button(gr, text="Search groups",
+                   command=lambda: self._vrcn_go(
+                       lambda: ", ".join(self.api.search_groups(
+                           self.vrcn_gsearch.get())) or "none")
+                   ).pack(side="left", padx=4)
+        ttk.Label(gr, text="Group ID:").pack(side="left", padx=(6, 0))
+        self.vrcn_gid = ttk.Entry(gr, width=14)
+        self.vrcn_gid.pack(side="left", padx=3)
+        ttk.Button(gr, text="Join",
+                   command=lambda: self._vrcn_go(
+                       self.api.join_group, self.vrcn_gid.get())).pack(
+            side="left", padx=4)
+        ttk.Button(gr, text="Leave",
+                   command=lambda: self._vrcn_go(
+                       self.api.leave_group, self.vrcn_gid.get())).pack(
+            side="left", padx=4)
+
+        gl = ttk.LabelFrame(f, text="Gallery & files (photos / icons / "
+                                    "emojis / stickers, VRC+)", padding=6)
+        gl.grid(row=5, column=0, sticky="ew", pady=2)
+        self.vrcn_gkind = ttk.Combobox(gl, width=8, state="readonly",
+            values=("photos", "icon", "emoji", "sticker"))
+        self.vrcn_gkind.set("photos"); self.vrcn_gkind.pack(side="left")
+        ttk.Button(gl, text="List",
+                   command=lambda: self._vrcn_go(
+                       lambda: ", ".join(n for _, n in
+                                         self.api.gallery_list(
+                                             self.vrcn_gkind.get()))
+                       or "none")).pack(side="left", padx=4)
+        ttk.Label(gl, text="Delete ID:").pack(side="left", padx=(6, 0))
+        self.vrcn_del = ttk.Entry(gl, width=14)
+        self.vrcn_del.pack(side="left", padx=3)
+        ttk.Button(gl, text="Delete",
+                   command=lambda: self._vrcn_go(
+                       self.api.delete_file, self.vrcn_del.get())).pack(
+            side="left", padx=4)
+
+        st = ttk.LabelFrame(f, text="Playtime stats + timeline (local, like "
+                                    "VRCNext)", padding=6)
+        st.grid(row=6, column=0, sticky="ew", pady=2)
+        self.stats_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(st, text="Track my worlds/friends (5 min poll)",
+                        variable=self.stats_on,
+                        command=self._vrcn_stats).pack(side="left")
+        ttk.Button(st, text="Show stats",
+                   command=self._vrcn_show_stats).pack(side="left", padx=4)
+        ttk.Button(st, text="Timeline",
+                   command=lambda: self._vrcn_go(
+                       lambda: " || ".join(self.cfg.get("timeline", []))
+                       or "empty")).pack(side="left", padx=4)
+
+        self.vrcn_log = scrolledtext.ScrolledText(f, height=7, wrap="word",
+                                                  font=("Segoe UI", 9))
+        self.vrcn_log.grid(row=7, column=0, sticky="ew", pady=(6, 0))
+        self.vrcn_log.config(state="disabled")
 
     # ---- Launcher tab (VRCNext)
 
