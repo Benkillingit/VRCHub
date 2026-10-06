@@ -97,6 +97,12 @@ VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel 
 - **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
 - **Delete** — removes it from your vault only.
 
+### Desktop overlay (4.6)
+Extras → **Open desktop overlay**: a small always-on-top window with a clock, a status line, and a quick chatbox send box. Drag to move it, right-click to close, Enter sends. 85% opacity, no window chrome. Meant for desktop-mode play; on Linux some compositors ignore always-on-top.
+
+### Does VRCHub work in VR? (4.6)
+Yes, unchanged. VRCHub never renders anything inside VRChat — it talks over your local network (OSC/UDP and the VRChat API), which behaves identically whether VRChat is on your monitor or in your headset. Run VRCHub on the same PC (or LAN host if you edit the OSC host) and it drives your in-VR avatar the same way. What is *not* possible: displaying VRCHub's own window inside VR (that would need a VR engine + headset SDK, not stdlib Python) — the desktop overlay on your monitor is the companion view.
+
 ### Search ALL sources (4.5)
 The **Search ALL sources** button runs one query across every avatar database VRCHub can legitimately reach:
 1. **VRChat's public avatar database** (the official one) — now sorted by popularity, 60 results
