@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.0** | |
+| World OSC console — see and talk to OSC-enabled worlds (Popcorn Palace style): /world/ filter, double-click a line to load its address, send values back | user request |
 | **NEW in 4.9** | |
 | Banner slot — slim top bar with your text + clickable link, off by default, toggled + configured in Extras | user request |
 | **NEW in 4.8** | |
