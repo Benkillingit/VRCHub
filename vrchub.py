@@ -54,7 +54,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.5.1"
+APP_VERSION = "6.5.2"
 
 # VRCNext-style dark palette
 VRN_BG = "#15171c"      # window background
@@ -899,6 +899,59 @@ def save_config(cfg):
         pass
 
 
+def vrchat_files_scan():
+    """Find VRChat install + local data files (Windows)."""
+    out = {"exe": "", "data_dir": "", "config": "",
+           "osc_cfg_dir": "", "photos": "", "log": ""}
+    home = os.path.expanduser("~")
+    exe_candidates = []
+    try:
+        import winreg
+        for hive, key in (
+                (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE,
+                 r"Software\WOW6432Node\Valve\Steam")):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    sp, _ = winreg.QueryValueEx(k, "SteamPath")
+                    exe_candidates.append(os.path.join(
+                        sp, "steamapps", "common", "VRChat",
+                        "VRChat.exe"))
+            except OSError:
+                pass
+    except ImportError:
+        pass
+    exe_candidates += [
+        os.path.expandvars(r"%ProgramFiles(x86)%\Steam\steamapps"
+                           r"\common\VRChat\VRChat.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Steam\steamapps\common"
+                           r"\VRChat\VRChat.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Oculus\Software\Software"
+                           r"\vrchat-vrchat\VRChat.exe"),
+    ]
+    for c in exe_candidates:
+        if c and os.path.isfile(c):
+            out["exe"] = c
+            break
+    data = os.path.join(home, "AppData", "LocalLow", "VRChat",
+                        "VRChat")
+    if os.path.isdir(data):
+        out["data_dir"] = data
+        cfgp = os.path.join(data, "config.json")
+        if os.path.isfile(cfgp):
+            out["config"] = cfgp
+        oscd = os.path.join(data, "OSCAvatarConfig")
+        if os.path.isdir(oscd):
+            out["osc_cfg_dir"] = oscd
+        lp = os.path.join(data, "output.log")
+        if os.path.isfile(lp):
+            out["log"] = lp
+    ph = os.path.join(home, "Pictures", "VRChat")
+    if os.path.isdir(ph):
+        out["photos"] = ph
+    return out
+
+
 def autodetect(tools):
     roots = [
         os.path.expandvars(r"%ProgramFiles%"),
@@ -1397,6 +1450,7 @@ class VRCHubApp(tk.Tk):
         self.status_var = tk.StringVar(value="Ready.")
         self._banner_build()
         self._server_check(first=True)
+        self.after(1500, lambda: self._auto_setup())
         threading.Thread(target=self._activity_loop, daemon=True).start()
         threading.Thread(target=self._together_loop, daemon=True).start()
         wrap = ttk.Frame(self)
@@ -1687,6 +1741,9 @@ class VRCHubApp(tk.Tk):
         self.profile_name.pack(side="left", padx=3)
         ttk.Button(prow, text="Save session", width=13,
                    command=self._save_profile).pack(side="left", padx=2)
+        ttk.Button(prow, text="Auto setup", width=11,
+                   command=lambda: self._auto_setup(verbose=True)
+                   ).pack(side="left", padx=2)
         ttk.Button(prow, text="Load", width=6,
                    command=self._load_profile).pack(side="left", padx=2)
         ttk.Label(prow, text="(multi-account: save several, type name + Load "
@@ -1968,6 +2025,68 @@ class VRCHubApp(tk.Tk):
                 self.after(0, lambda ex=e: self.status(str(ex)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Pulling...")
+
+    def _auto_setup(self, verbose=False):
+        """Auto-detect VRChat files and wire up connections."""
+        def work():
+            found = vrchat_files_scan()
+            # tool paths (launcher) - fill any blanks
+            tools = autodetect(DEFAULT_TOOLS)
+            tools_changed = False
+            for label, var in getattr(self, "tool_paths", {}).items():
+                if not var.get().strip() and tools.get(label):
+                    self.after(0, lambda l=label, p=tools[label]:
+                               self.tool_paths[l].set(p))
+                    tools_changed = True
+            if found["exe"] and not tools.get("VRChat"):
+                self.after(0, lambda: self.tool_paths["VRChat"].set(
+                    found["exe"]))
+                tools_changed = True
+            if tools_changed:
+                self.after(0, self._save_tools)
+            self.cfg["vrchat_paths"] = found
+            save_config(self.cfg)
+            # auto-login from VRChat's own config.json auth cookie
+            logged = ""
+            if (found["config"]
+                    and not (self.cfg.get("vrchat_cookies") or {}).get(
+                        "auth")):
+                try:
+                    with open(found["config"], "r",
+                              encoding="utf-8") as fh:
+                        vcfg = json.load(fh)
+                    tok = vcfg.get("auth") or vcfg.get("authCookie")
+                    if tok:
+                        self.api.load_cookies({"auth": tok})
+                        me = self.api.me()
+                        self.cfg["vrchat_cookies"] = self.api.cookies()
+                        save_config(self.cfg)
+                        logged = me.get("displayName", "?")
+                        def ok():
+                            self.vrc_me_label.config(
+                                text="Auto-login: %s" % logged)
+                        self.after(0, ok)
+                except Exception:
+                    pass
+            def report():
+                parts = []
+                if found["exe"]:
+                    parts.append("install OK")
+                if found["config"]:
+                    parts.append("config.json OK")
+                if found["osc_cfg_dir"]:
+                    parts.append("avatar configs OK")
+                if found["photos"]:
+                    parts.append("photos OK")
+                if logged:
+                    parts.append("logged in as %s" % logged)
+                msg = ("Auto-setup: " + (", ".join(parts)
+                        if parts else "VRChat not found yet"))
+                self.status(msg)
+                if verbose:
+                    self.vrc_me_label.config(text=(msg[:90]))
+            self.after(0, report)
+        threading.Thread(target=work, daemon=True).start()
 
     def _try_session(self):
         cookies = self.cfg.get("vrchat_cookies", {})
