@@ -53,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.4.1"
+APP_VERSION = "5.6.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1905,6 +1905,26 @@ class VRCHubApp(tk.Tk):
         ap = ttk.LabelFrame(f, text="Per-avatar profile (VRCOSC profiles)",
                             padding=6)
         ap.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        sm = ttk.LabelFrame(f, text="Smooth a parameter (OSCmooth-style)",
+                            padding=6)
+        sm.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        ttk.Label(sm, text="Name:").pack(side="left")
+        self.sm_name = ttk.Entry(sm, width=14)
+        self.sm_name.pack(side="left", padx=3)
+        ttk.Label(sm, text="From:").pack(side="left")
+        self.sm_from = ttk.Entry(sm, width=5)
+        self.sm_from.insert(0, "0")
+        self.sm_from.pack(side="left", padx=3)
+        ttk.Label(sm, text="To:").pack(side="left")
+        self.sm_to = ttk.Entry(sm, width=5)
+        self.sm_to.insert(0, "1")
+        self.sm_to.pack(side="left", padx=3)
+        ttk.Label(sm, text="Over s:").pack(side="left")
+        self.sm_secs = ttk.Entry(sm, width=4)
+        self.sm_secs.insert(0, "2")
+        self.sm_secs.pack(side="left", padx=3)
+        ttk.Button(sm, text="Smooth it",
+                   command=self._smooth_param).pack(side="left", padx=6)
         ttk.Label(ap, text="Avatar ID:").pack(side="left")
         self.ap_id = ttk.Entry(ap, width=24)
         self.ap_id.pack(side="left", padx=4)
@@ -2580,6 +2600,25 @@ class VRCHubApp(tk.Tk):
         rt = ttk.LabelFrame(f, text="OSC router (OscGoesBrrr-style echo)",
                             padding=6)
         rt.grid(row=12, column=0, sticky="ew", pady=3)
+        mv = ttk.LabelFrame(f, text="Movement nudge (OSCLeash-style /input/ "
+                                    "sliders)", padding=6)
+        mv.grid(row=13, column=0, sticky="ew", pady=3)
+        ttk.Label(mv, text="Fwd/back:").pack(side="left")
+        self.mv_v = tk.Scale(mv, from_=-1, to=1, resolution=0.1, length=140,
+                             orient="horizontal", showvalue=True,
+                             command=lambda v: self._move_send("Vertical",
+                                                               v))
+        self.mv_v.set(0)
+        self.mv_v.pack(side="left", padx=4)
+        ttk.Label(mv, text="Left/right:").pack(side="left")
+        self.mv_h = tk.Scale(mv, from_=-1, to=1, resolution=0.1, length=140,
+                             orient="horizontal", showvalue=True,
+                             command=lambda v: self._move_send("Horizontal",
+                                                               v))
+        self.mv_h.set(0)
+        self.mv_h.pack(side="left", padx=4)
+        ttk.Button(mv, text="Stop", width=6,
+                   command=self._move_stop).pack(side="left", padx=6)
         self.router_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(rt, text="Echo incoming OSC back to VRChat",
                         variable=self.router_on).pack(side="left")
@@ -3241,6 +3280,109 @@ class VRCHubApp(tk.Tk):
         else:
             self.after(int(delay * 1000), send_later)
 
+    # ---- phone keyboard
+
+    def _phone_toggle(self):
+        if getattr(self, "_phone_srv", None):
+            self._phone_srv.shutdown()
+            self._phone_srv = None
+            self.phone_btn.config(text="Start phone keyboard")
+            self.phone_url.config(text="off")
+            self.status("Phone keyboard stopped.")
+            return
+        from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+
+        app = self
+        PAGE = ("<!doctype html><html><head><meta charset=utf-8>"
+                "<meta name=viewport content='width=device-width,"
+                "initial-scale=1'><title>VRCHub</title></head>"
+                "<body style='font-family:sans-serif;background:#111;"
+                "color:#eee;text-align:center;padding:20px'>"
+                "<h2>VRCHub chatbox</h2>"
+                "<input id=t style='font-size:22px;width:90%' autofocus>"
+                "<br><br><button style='font-size:22px;padding:12px 30px' "
+                "onclick=\"fetch('/send',{method:'POST',body:"
+                "document.getElementById('t').value});"
+                "document.getElementById('t').value='\">Send</button>"
+                "<p style=color:#888>Enter sends too. Same WiFi only.</p>"
+                "<script>document.getElementById('t')."
+                "addEventListener('keydown',e=>{if(e.key==='Enter')"
+                "{fetch('/send',{method:'POST',body:e.target.value});"
+                "e.target.value=''}})</script></body></html>")
+
+        class H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(PAGE.encode())
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", 0))
+                msg = self.rfile.read(n).decode("utf-8", "replace").strip()
+                if msg:
+                    app.after(0, lambda m=msg[:144]: app._send_chatbox(m))
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+        except OSError:
+            ip = "127.0.0.1"
+        try:
+            self._phone_srv = ThreadingHTTPServer(("0.0.0.0", 8756), H)
+        except OSError as e:
+            self.status("Port 8756 busy? %s" % str(e)[:40])
+            return
+        threading.Thread(target=self._phone_srv.serve_forever,
+                         daemon=True).start()
+        url = "http://%s:8756" % ip
+        self.phone_btn.config(text="Stop phone keyboard")
+        self.phone_url.config(text=url)
+        self.status("Open %s on your phone." % url)
+
+    # ---- param smoothing
+
+    def _smooth_param(self):
+        name = self.sm_name.get().strip()
+        if not name:
+            self.status("Smooth: enter a parameter name.")
+            return
+        try:
+            a = float(self.sm_from.get())
+            b = float(self.sm_to.get())
+            secs = max(0.2, float(self.sm_secs.get()))
+        except ValueError:
+            self.status("Smooth: numbers only.")
+            return
+        steps = 24
+
+        def work():
+            for i in range(steps + 1):
+                v = a + (b - a) * i / steps
+                self.osc.send("/avatar/parameters/" + name, v)
+                time.sleep(secs / steps)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Smoothing %s over %.1fs." % (name, secs))
+
+    # ---- movement sliders
+
+    def _move_send(self, axis, val):
+        try:
+            self.osc.send("/input/Move" + axis, float(val))
+        except Exception:
+            pass
+
+    def _move_stop(self):
+        self.mv_v.set(0)
+        self.mv_h.set(0)
+
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
         self._ban_frame = tk.Frame(self, bg="#222", height=26)
@@ -3561,6 +3703,16 @@ class VRCHubApp(tk.Tk):
         self.vrcx_port = ttk.Entry(vx, width=6)
         self.vrcx_port.insert(0, "9739")
         self.vrcx_port.grid(row=0, column=3, padx=4)
+        pk = ttk.LabelFrame(vx, text="Phone keyboard (type on your phone "
+                                     "-> VRChat)", padding=6)
+        pk.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(8, 0))
+        self.phone_btn = ttk.Button(pk, text="Start phone keyboard",
+                                    command=self._phone_toggle)
+        self.phone_btn.pack(side="left")
+        self.phone_url = ttk.Label(pk, text="off")
+        self.phone_url.pack(side="left", padx=8)
+        ttk.Label(pk, text="(phone must be on the same WiFi; web page only, "
+                           "no app)").pack(side="left")
         ttk.Label(vx, text="Token:").grid(row=0, column=4)
         self.vrcx_token = ttk.Entry(vx, width=14)
         self.vrcx_token.grid(row=0, column=5, padx=4)
