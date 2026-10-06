@@ -50,10 +50,10 @@ import urllib.parse
 import urllib.request
 import http.cookiejar
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.9.0"
+APP_VERSION = "6.0.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1147,6 +1147,8 @@ class VRCHubApp(tk.Tk):
         self._tab_face(nb)
         self._tab_help(nb)
         self._tab_vrcn(nb)
+        if self.cfg.get("launch_on_start"):
+            self.after(8000, self._launch_all)
         self.nb = nb
         menubar = tk.Menu(self)
         categories = {
@@ -1504,6 +1506,15 @@ class VRCHubApp(tk.Tk):
         ttk.Label(crow, text="(token first, user/repo second; private "
                              "repo = only you see it)").pack(side="left",
                                                              padx=6)
+        erow = ttk.Frame(sa)
+        erow.pack(fill="x", pady=(4, 0))
+        ttk.Label(erow, text="Data:").pack(side="left")
+        ttk.Button(erow, text="Export to file",
+                   command=self._vault_export).pack(side="left", padx=3)
+        ttk.Button(erow, text="Import from file",
+                   command=self._vault_import).pack(side="left", padx=3)
+        ttk.Label(erow, text="(JSON backup of avatars + wear times + "
+                             "rules + stats)").pack(side="left", padx=6)
         self.avatar_tree.bind("<<TreeviewSelect>>",
                               lambda e: self._avatar_selected())
 
@@ -2218,6 +2229,9 @@ class VRCHubApp(tk.Tk):
         self.hr_relay = tk.BooleanVar(value=True)
         ttk.Checkbutton(hr, text="Show BPM in chatbox",
                         variable=self.hr_relay).grid(row=0, column=3)
+        self.hr_param = tk.BooleanVar(value=False)
+        ttk.Checkbutton(hr, text="Send to avatar param HR",
+                        variable=self.hr_param).grid(row=0, column=5)
         self.hr_label = ttk.Label(hr, text="— BPM")
         self.hr_label.grid(row=0, column=4, padx=10)
         ttk.Label(hr, text="Pulsoid token:").grid(row=1, column=0, sticky="w")
@@ -2346,6 +2360,9 @@ class VRCHubApp(tk.Tk):
 
                     def show(b=bpm):
                         self.hr_label.config(text="%s BPM" % b)
+                        if self.hr_param.get():
+                            self.osc.send("/avatar/parameters/HR",
+                                          float(b))
                         if (self.hr_relay.get() and
                                 time.time() - last_sent > 10):
                             self.osc.chatbox("Heart: %s BPM" % b)
@@ -2397,6 +2414,9 @@ class VRCHubApp(tk.Tk):
 
                     def show(b=bpm):
                         self.hr_label.config(text="%s BPM" % b)
+                        if self.hr_param.get():
+                            self.osc.send("/avatar/parameters/HR",
+                                          float(b))
                         if (self.hr_relay.get() and
                                 time.time() - last_sent > 10):
                             self.osc.chatbox("❤ %s BPM" % b)
@@ -4487,6 +4507,86 @@ class VRCHubApp(tk.Tk):
         ttk.Button(row, text="Check for updates now", width=21,
                    command=self._check_updates).pack(side="left")
 
+    def _vault_export(self):
+        fn = filedialog.asksaveasfilename(defaultextension=".json",
+                                         filetypes=[("JSON", "*.json")])
+        if not fn:
+            return
+        keys = ("saved_avatars", "avatar_time", "world_time",
+                "friend_time", "timeline", "rules")
+        out = {k: self.cfg.get(k) for k in keys if self.cfg.get(k) is not None}
+        open(fn, "w").write(json.dumps(out, indent=1))
+        self.status("Exported %d section(s)." % len(out))
+
+    def _vault_import(self):
+        fn = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if not fn:
+            return
+        try:
+            data = json.load(open(fn))
+        except ValueError:
+            self.status("Not a valid JSON file.")
+            return
+        for k, v in data.items():
+            if k in ("saved_avatars", "avatar_time", "world_time",
+                     "friend_time", "timeline", "rules"):
+                self.cfg[k] = v
+        save_config(self.cfg)
+        self._rule_refresh()
+        self._fill_saved_avatars()
+        self.status("Imported %d section(s)." % len(data))
+
+    # ---- weather + clock (MCB/VRCOSC parity)
+
+    WCODES = {0: "clear", 1: "mostly clear", 2: "partly cloudy",
+              3: "overcast", 45: "fog", 48: "fog", 51: "drizzle",
+              53: "drizzle", 55: "drizzle", 61: "light rain",
+              63: "rain", 65: "heavy rain", 71: "snow", 73: "snow",
+              75: "snow", 80: "rain showers", 81: "rain showers",
+              82: "heavy showers", 95: "thunderstorm"}
+
+    def _wx_toggle(self):
+        if self.wx_on.get():
+            self.wx_on.set(False)
+            self.wx_btn.config(text="Start")
+            self.status("Weather off.")
+            return
+        city = self.wx_city.get().strip()
+        if not city:
+            self.status("Type a city first.")
+            return
+        self.cfg["wx_city"] = city
+        save_config(self.cfg)
+        self.wx_on.set(True)
+        self.wx_btn.config(text="Stop")
+
+        def work():
+            while self.wx_on.get():
+                try:
+                    g = json.load(urllib.request.urlopen(
+                        "https://geocoding-api.open-meteo.com/v1/search"
+                        "?name=%s&count=1" % urllib.parse.quote(city)))
+                    hit = g["results"][0]
+                    w = json.load(urllib.request.urlopen(
+                        "https://api.open-meteo.com/v1/forecast?lat=%s"
+                        "&lon=%s&current=temperature_2m,weather_code"
+                        % (hit["latitude"], hit["longitude"])))
+                    cur = w["current"]
+                    line = "%s · %s · %s°C, %s" % (
+                        time.strftime("%H:%M"), hit["name"],
+                        int(cur["temperature_2m"]),
+                        self.WCODES.get(cur["weather_code"], "ok"))
+                    self.after(0, lambda l=line: self.osc.chatbox(l))
+                    self.after(0, lambda l=line: self.status(l))
+                except Exception as e:
+                    self.after(0, lambda: self.status(
+                        "Weather: %s" % e.__class__.__name__))
+                for _ in range(600):
+                    if not self.wx_on.get():
+                        return
+                    time.sleep(1)
+        threading.Thread(target=work, daemon=True).start()
+
     # ---- VRCNext parity tab
 
     def _vrcn_id(self, name):
@@ -4769,6 +4869,19 @@ class VRCHubApp(tk.Tk):
         st = ttk.LabelFrame(f, text="Playtime stats + timeline (local, like "
                                     "VRCNext)", padding=6)
         st.grid(row=6, column=0, sticky="ew", pady=2)
+        wx = ttk.LabelFrame(f, text="Clock + weather in chatbox "
+                                    "(open-meteo, free, no key)",
+                            padding=6)
+        wx.grid(row=16, column=0, sticky="ew", pady=3)
+        ttk.Label(wx, text="City:").pack(side="left")
+        self.wx_city = ttk.Entry(wx, width=14)
+        self.wx_city.insert(0, self.cfg.get("wx_city", ""))
+        self.wx_city.pack(side="left", padx=3)
+        self.wx_on = tk.BooleanVar(value=False)
+        self.wx_btn = ttk.Button(wx, text="Start", command=self._wx_toggle)
+        self.wx_btn.pack(side="left", padx=4)
+        ttk.Label(wx, text="(every 10 min: '21:41 · City · 14°C, rain')"
+                  ).pack(side="left", padx=6)
         self.stats_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(st, text="Track my worlds/friends (5 min poll)",
                         variable=self.stats_on,
@@ -4813,6 +4926,15 @@ class VRCHubApp(tk.Tk):
                    command=self._save_tools).pack(side="left", padx=3)
         ttk.Button(btns, text="Launch all",
                    command=self._launch_all).pack(side="left", padx=3)
+        self.launch_on_start = tk.BooleanVar(
+            value=bool(self.cfg.get("launch_on_start")))
+
+        def _lstart():
+            self.cfg["launch_on_start"] = self.launch_on_start.get()
+            save_config(self.cfg)
+        ttk.Checkbutton(btns, text="Launch all when VRCHub starts",
+                        variable=self.launch_on_start,
+                        command=_lstart).pack(side="left", padx=8)
         ttk.Button(btns, text="Download missing apps",
                    command=self._open_downloads).pack(side="left", padx=3)
         f.columnconfigure(1, weight=1)
