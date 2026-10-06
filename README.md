@@ -17,6 +17,11 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.0** | |
+| Full documentation — DOCS.md (tutorial, every tab, troubleshooting) | |
+| In-app Help tab with quick start | |
+| Countdown timer in chatbox | |
+| Scheduled chatbox messages (send later) | |
 | **NEW in 3.3 — more from the trackers** | |
 | Clock in chatbox | VRCOSC (clock module) |
 | Media + hardware stats combined in one chatbox line | VRCOSC (most-commented request) |
