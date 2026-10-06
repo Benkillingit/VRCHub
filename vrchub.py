@@ -52,9 +52,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.1.0"
+APP_VERSION = "5.2.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
+TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
 
 
 # ================================================================ OSC engine
@@ -948,6 +949,7 @@ class VRCHubApp(tk.Tk):
         self._banner_build()
         self._server_check(first=True)
         threading.Thread(target=self._activity_loop, daemon=True).start()
+        threading.Thread(target=self._together_loop, daemon=True).start()
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=6, pady=6)
         self._tab_chatbox(nb)
@@ -1020,6 +1022,21 @@ class VRCHubApp(tk.Tk):
         cyc = ttk.LabelFrame(f, text="Cycle lines (VRC-NEXUS style, one per "
                                      "line)", padding=6)
         cyc.grid(row=4, column=0, columnspan=3, sticky="ew")
+        anim = ttk.LabelFrame(f, text="Animate a message (VRCOSC-style)",
+                              padding=6)
+        anim.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        self.anim_text = ttk.Entry(anim, width=30)
+        self.anim_text.insert(0, "hello!")
+        self.anim_text.pack(side="left")
+        self.anim_style = ttk.Combobox(anim, width=10, state="readonly",
+                                      values=("wave", "bounce",
+                                              "typewriter", "pulse"))
+        self.anim_style.set("wave")
+        self.anim_style.pack(side="left", padx=6)
+        ttk.Button(anim, text="Animate 8s",
+                   command=self._animate_message).pack(side="left", padx=6)
+        ttk.Label(anim, text="(cycles decorated frames into the chatbox)"
+                  ).pack(side="left", padx=6)
         self.cycle_text = scrolledtext.ScrolledText(cyc, height=4, width=52)
         self.cycle_text.grid(row=0, column=0, columnspan=2, sticky="ew")
         side = ttk.Frame(cyc)
@@ -1799,6 +1816,21 @@ class VRCHubApp(tk.Tk):
 
         io = ttk.LabelFrame(f, text="Inputs", padding=6)
         io.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(12, 0))
+        ap = ttk.LabelFrame(f, text="Per-avatar profile (VRCOSC profiles)",
+                            padding=6)
+        ap.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        ttk.Label(ap, text="Avatar ID:").pack(side="left")
+        self.ap_id = ttk.Entry(ap, width=24)
+        self.ap_id.pack(side="left", padx=4)
+        ttk.Button(ap, text="Use current", width=11,
+                   command=self._profile_current_avatar).pack(side="left",
+                                                              padx=2)
+        ttk.Button(ap, text="Add param", width=10,
+                   command=self._profile_add_param).pack(side="left", padx=2)
+        ttk.Button(ap, text="Apply profile", width=12,
+                   command=self._profile_apply).pack(side="left", padx=2)
+        self.ap_count = ttk.Label(ap, text="0 params")
+        self.ap_count.pack(side="left", padx=8)
         ttk.Button(io, text="Jump", command=lambda: self.osc.input_jump()).grid(
             row=0, column=0, padx=3)
         ttk.Button(io, text="Look up",
@@ -2164,6 +2196,16 @@ class VRCHubApp(tk.Tk):
                                                    font=("Consolas", 9),
                                                    wrap="word")
         self.notif_log.pack(fill="x", pady=(6, 0))
+        iv = ttk.Frame(f)
+        iv.pack(fill="x", pady=(4, 0))
+        self.notif_list = tk.Listbox(iv, height=4)
+        self.notif_list.pack(side="left", fill="x", expand=True)
+        vb = ttk.Frame(iv)
+        vb.pack(side="left", padx=6)
+        ttk.Button(vb, text="Accept invite / friend request",
+                   command=lambda: self._notif_respond(True)).pack(fill="x")
+        ttk.Button(vb, text="Hide notification",
+                   command=lambda: self._notif_respond(False)).pack(fill="x")
         panes.columnconfigure(0, weight=1)
         panes.columnconfigure(1, weight=1)
         panes.rowconfigure(0, weight=1)
@@ -2241,8 +2283,14 @@ class VRCHubApp(tk.Tk):
                 notifs = self.api.notifications()
 
                 def fill():
+                    self._notifs = notifs
+                    self.notif_list.delete(0, "end")
                     self._log_to(self.notif_log, "--- notifications ---")
                     for n in notifs:
+                        self.notif_list.insert(
+                            "end", "%s | %s | %s" % (n["type"][:12],
+                                                     n["sender"][:10],
+                                                     n["title"][:32]))
                         self._log_to(self.notif_log, "[%s] %s %s"
                                      % (n["type"], n["sender"][:8], n["title"]))
                     self.status("%d notification(s)." % len(notifs))
@@ -2423,6 +2471,8 @@ class VRCHubApp(tk.Tk):
                    command=self._server_check).pack(side="left", padx=6)
         ttk.Button(sv, text="Activity heatmap", width=15,
                    command=self._heatmap_show).pack(side="left", padx=6)
+        ttk.Button(sv, text="Time with friends", width=16,
+                   command=self._together_show).pack(side="left", padx=6)
         ttk.Label(sv, text="(tracks hours while VRCHub runs)"
                   ).pack(side="left", padx=4)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
@@ -2808,6 +2858,162 @@ class VRCHubApp(tk.Tk):
         cv.create_text(30, 190, anchor="w", fill="#aaa",
                        text="Bucket = minutes VRCHub was running; bright = "
                             "peak. Builds history the longer you use it.")
+
+    # ---- chatbox animation
+
+    def _animate_message(self):
+        text = self.anim_text.get().strip()
+        style = self.anim_style.get()
+        if not text:
+            self.status("Animate: type something first.")
+            return
+        if getattr(self, "_anim_on", False):
+            return
+        self._anim_on = True
+
+        def frame(i):
+            if style == "wave":
+                off = " " * (i % 4) if i % 8 < 4 else " " * (3 - i % 4)
+                return "%s%s" % (text, off)
+            if style == "bounce":
+                return " " * abs((i % 6) - 3) + text
+            if style == "typewriter":
+                return text[:i % (len(text) + 1)]
+            return "%s %s !" % ("!" * (i % 4), text)
+
+        def work():
+            for i in range(14):
+                if not getattr(self, "_anim_on", False):
+                    break
+                self.osc.chatbox(frame(i))
+                time.sleep(0.6)
+            self._anim_on = False
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Animating for ~8s.")
+
+    # ---- per-avatar profiles
+
+    def _profile_current_avatar(self):
+        me = getattr(self, "_me", None)
+
+        def work():
+            try:
+                code, text = self.api._request("GET", "/auth/user")
+                aid = (self.api._json(text) or {}).get(
+                    "currentAvatar", "") if code == 200 else None
+                if aid:
+                    self.after(0, lambda: (self.ap_id.delete(0, "end"),
+                                           self.ap_id.insert(0, aid),
+                                           self._profile_count()))
+                else:
+                    self.after(0, lambda: self.status(
+                        "Log into the VRChat API first."))
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:60]))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _profile_count(self):
+        av = self.ap_id.get().strip()
+        n = len(self.cfg.get("avatar_profiles", {}).get(av, []))
+        self.ap_count.config(text="%d params" % n)
+
+    def _profile_add_param(self):
+        av = self.ap_id.get().strip()
+        if not av:
+            self.status("Profile: enter/fetch an avatar ID first.")
+            return
+        prof = self.cfg.get("avatar_profiles", {})
+        prof.setdefault(av, []).append({
+            "name": self.p_name.get().strip(),
+            "type": self.p_type.get(),
+            "value": self.p_value.get().strip()})
+        self.cfg["avatar_profiles"] = prof
+        save_config(self.cfg)
+        self._profile_count()
+        self.status('Saved "%s" to profile.' % self.p_name.get().strip())
+
+    def _profile_apply(self):
+        av = self.ap_id.get().strip()
+        params = self.cfg.get("avatar_profiles", {}).get(av, [])
+        if not params:
+            self.status("Profile empty: add params (name/type/value "
+                        "above) first.")
+            return
+        sent = 0
+        for p in params:
+            try:
+                v = (True if p["value"].lower() == "true"
+                     else False if p["value"].lower() == "false"
+                     else int(p["value"]) if p["type"] == "int"
+                     else float(p["value"]) if p["type"] == "float"
+                     else p["value"])
+                self.osc.send("/avatar/parameters/" + p["name"], v)
+                sent += 1
+            except Exception:
+                pass
+        self.status("Applied %d/%d params for this avatar."
+                    % (sent, len(params)))
+
+    # ---- invite/notification response
+
+    def _notif_respond(self, accept):
+        sel = self.notif_list.curselection()
+        if not sel:
+            self.status("Pick a notification from the list first.")
+            return
+        n = getattr(self, "_notifs", [])[sel[0]]
+
+        def work():
+            try:
+                self.api.respond_notification(n["id"], accept)
+                self.after(0, lambda: self.status(
+                    "Accepted." if accept else "Hidden."))
+                self.after(0, self._load_notifications)
+            except Exception as e:
+                self.after(0, lambda: self.status(str(e)[:70]))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- time spent together
+
+    def _together_loop(self):
+        """Count minutes each friend is online while VRCHub runs."""
+        while True:
+            if getattr(self, "_me", None) and self.cfg.get("vrchat_cookies"):
+                try:
+                    friends = self.api.friends_online()
+                    online = [f for f in friends
+                              if f["state"] != "offline"]
+                    if online:
+                        try:
+                            data = json.load(open(TOGETHER_FILE))
+                        except Exception:
+                            data = {}
+                        for f in online:
+                            d = data.setdefault(
+                                f["id"], {"name": f["name"], "min": 0})
+                            d["name"] = f["name"]
+                            d["min"] += 1
+                        json.dump(data, open(TOGETHER_FILE, "w"))
+                except Exception:
+                    pass  # not logged in / offline
+            time.sleep(60)
+
+    def _together_show(self):
+        try:
+            data = json.load(open(TOGETHER_FILE))
+        except Exception:
+            data = {}
+        rows = sorted(data.items(), key=lambda kv: -kv[1]["min"])[:30]
+        win = tk.Toplevel(self)
+        win.title("Time online together (VRCHub open)")
+        lst = tk.Listbox(win, width=44, height=min(20, max(8, len(rows))),
+                         font=("Segoe UI", 10))
+        lst.pack(padx=10, pady=10)
+        if not rows:
+            lst.insert("end", "No data yet - keep VRCHub running.")
+        for fid, d in rows:
+            lst.insert("end", "%-18s %4dh %02dm" % (
+                d["name"][:18], d["min"] // 60, d["min"] % 60))
 
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
