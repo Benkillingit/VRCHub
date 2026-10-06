@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.5** | |
+| One-click setup: `install.bat` (Windows) / `install.sh` checks Python, installs all optional extras (Pillow, tinytuya, face-tracking on demand), creates plugins folder | user request |
 | **NEW in 5.4** | |
 | Voice suite — mic to chatbox (built-in Windows speech), speech + typed auto-translate (free, no key), OSC router echo with delay (OscGoesBrrr-style) | ecosystem sweep 2 |
 | **NEW in 5.3** | |
