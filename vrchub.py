@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "4.4.0"
+APP_VERSION = "4.5.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -240,7 +240,8 @@ class VRChatAPI:
         return out
 
     def search_public_avatars(self, query):
-        q = "/avatars?search=" + urllib.parse.quote(query) + "&n=20"
+        q = ("/avatars?search=" + urllib.parse.quote(query)
+             + "&n=60&sort=popularity&order=descending")
         status, text = self._request("GET", q)
         if status != 200:
             raise RuntimeError("Search failed: " + text[:120])
@@ -1189,6 +1190,9 @@ class VRCHubApp(tk.Tk):
         self.av_search.pack(side="left", fill="x", expand=True)
         ttk.Button(row, text="Search public", width=14,
                    command=self._search_avatars).pack(side="left", padx=4)
+        ttk.Button(row, text="Search ALL sources", width=17,
+                   command=self._search_all_avatars).pack(side="left",
+                                                          padx=4)
         ttk.Button(av, text="Equip selected", command=self._equip_avatar).pack()
         mrow = ttk.Frame(av)
         mrow.pack(fill="x", pady=(3, 0))
@@ -1630,6 +1634,69 @@ class VRCHubApp(tk.Tk):
                 self.after(0, lambda: self.status(str(e)[:80]))
         threading.Thread(target=work, daemon=True).start()
         self.status("Searching public avatars...")
+
+    def _search_all_avatars(self):
+        """One search across every database VRCHub can reach:
+        VRChat public API, your own avatars, local vault, cloud vault."""
+        q = self.av_search.get().strip()
+        if not q:
+            self.status("Type an avatar name or ID to search.")
+            return
+        ql = q.lower()
+
+        def work():
+            results = {}
+            # 1. VRChat public database (sorted by popularity)
+            try:
+                for a in self.api.search_public_avatars(q):
+                    a["src"] = "public"
+                    results[a["id"]] = a
+            except Exception as e:
+                self.after(0, lambda: self.status("Public search: %s"
+                                                  % str(e)[:50]))
+            # 2. your own avatars
+            try:
+                for a in self.api.my_avatars():
+                    if ql in a["name"].lower() or ql in a["id"].lower():
+                        a["src"] = "mine"
+                        results.setdefault(a["id"], a)
+            except Exception:
+                pass
+            # 3. local vault
+            for a in self.cfg.get("saved_avatars", []):
+                if ql in a["name"].lower() or ql in a["id"].lower():
+                    results.setdefault(
+                        a["id"], {"id": a["id"], "name": a["name"],
+                                  "author": "vault", "src": "vault"})
+            # 4. cloud vault
+            try:
+                remote = self._cloud_api(
+                    "GET", self._cloud_url("saved_avatars.json"))
+                data = json.loads(base64.b64decode(remote["content"]))
+                for a in data.get("avatars", []):
+                    if ql in a.get("name", "").lower() or ql in a.get(
+                            "id", "").lower():
+                        results.setdefault(
+                            a["id"], {"id": a["id"], "name": a["name"],
+                                      "author": "cloud vault",
+                                      "src": "cloud"})
+            except Exception:
+                pass
+
+            merged = list(results.values())
+
+            def fill():
+                self._fill_avatars(merged)
+                srcs = {}
+                for a in merged:
+                    srcs[a["src"]] = srcs.get(a["src"], 0) + 1
+                self.status("ALL search: %d result(s) - %s"
+                            % (len(merged),
+                               ", ".join("%s: %d" % kv
+                                         for kv in sorted(srcs.items()))))
+            self.after(0, fill)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("Searching all sources...")
 
     def _equip_avatar(self):
         sel = self.avatar_tree.selection()
