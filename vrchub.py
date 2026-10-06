@@ -53,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.4.0"
+APP_VERSION = "5.4.1"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -3933,6 +3933,31 @@ class VRCHubApp(tk.Tk):
 
     # ---- Help tab (tutorial)
 
+    def _check_updates(self):
+        """Manual-only: compares APP_VERSION to the latest GitHub release."""
+        self.upd_label.config(text="checking...")
+        local = tuple(int(x) for x in APP_VERSION.split("."))
+
+        def work():
+            try:
+                req = urllib.request.Request(
+                    "https://api.github.com/repos/Benkillingit/VRCHub/"
+                    "releases/latest",
+                    headers={"User-Agent": "VRCHub/" + APP_VERSION})
+                tag = (json.load(urllib.request.urlopen(req, timeout=12))
+                       .get("tag_name", "v0").lstrip("v"))
+                remote = tuple(int(x) for x in
+                               (tag.split(".") + [0, 0])[:3])
+                if remote > local:
+                    msg = "Update available: %s (you have %s)" % (
+                        tag, APP_VERSION)
+                else:
+                    msg = "Up to date (%s)" % APP_VERSION
+            except Exception as e:
+                msg = "Could not check: %s" % str(e)[:50]
+            self.after(0, lambda: self.upd_label.config(text=msg))
+        threading.Thread(target=work, daemon=True).start()
+
     def _tab_help(self, nb):
         f = ttk.Frame(nb, padding=10)
         nb.add(f, text="  Help  ")
@@ -3940,6 +3965,14 @@ class VRCHubApp(tk.Tk):
         txt.pack(fill="both", expand=True)
         txt.insert("end", HELP_TEXT)
         txt.config(state="disabled")
+        row = ttk.Frame(f)
+        row.pack(fill="x", pady=(6, 0))
+        ttk.Label(row, text="Updates are never checked automatically - "
+                            "only when you click:").pack(side="left")
+        self.upd_label = ttk.Label(row, text="")
+        self.upd_label.pack(side="left", padx=8)
+        ttk.Button(row, text="Check for updates now", width=21,
+                   command=self._check_updates).pack(side="left")
 
     # ---- Launcher tab (VRCNext)
 
