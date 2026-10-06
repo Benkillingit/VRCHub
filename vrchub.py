@@ -51,7 +51,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.1.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 
 
@@ -210,9 +210,10 @@ class VRChatAPI:
 
     # ---- features
 
-    def friends_online(self):
+    def friends_online(self, include_offline=False):
         status, text = self._request(
-            "GET", "/friends?offline=false&n=100&order=last_login")
+            "GET", "/friends?offline=%s&n=100&order=last_login"
+            % ("true" if include_offline else "false"))
         if status != 200:
             raise RuntimeError("Could not load friends: " + text[:120])
         out = []
@@ -631,6 +632,7 @@ def load_config():
             "BRB one sec", "That's hilarious", "Take care o/",
         ],
         "vrchat_cookies": {},
+        "profiles": {},
     }
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -809,6 +811,8 @@ class VRCHubApp(tk.Tk):
         self.osc_listener = None
         self.osc_listening = False
         self.last_activity = time.time()
+        self.pul_running = False
+        self.pul_ws = None
         self.afk_running = False
         self.watch_running = False
         self.gcycle_running = False
@@ -1016,6 +1020,21 @@ class VRCHubApp(tk.Tk):
             row=1, column=3, padx=4)
         self.vrc_me_label = ttk.Label(login, text="Not logged in.")
         self.vrc_me_label.grid(row=2, column=0, columnspan=4, sticky="w")
+        prow = ttk.Frame(login)
+        prow.grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ttk.Label(prow, text="Profile:").pack(side="left")
+        self.profile_name = ttk.Entry(prow, width=12)
+        self.profile_name.pack(side="left", padx=3)
+        ttk.Button(prow, text="Save session", width=13,
+                   command=self._save_profile).pack(side="left", padx=2)
+        ttk.Button(prow, text="Load", width=6,
+                   command=self._load_profile).pack(side="left", padx=2)
+        ttk.Label(prow, text="(multi-account: save several, type name + Load "
+                             "to switch)").pack(side="left", padx=4)
+        # offline friends toggle
+        self.friends_offline = tk.BooleanVar(value=False)
+        ttk.Checkbutton(prow, text="Include offline",
+                        variable=self.friends_offline).pack(side="right")
 
         # friends
         fr = ttk.LabelFrame(f, text="Online friends (VRCX-style)", padding=6)
@@ -1091,10 +1110,39 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
         self.status("Logging in to VRChat...")
 
+    def _save_profile(self):
+        name = self.profile_name.get().strip()
+        if not name:
+            self.status("Type a profile name first.")
+            return
+        cookies = self.cfg.get("vrchat_cookies") or self.api.cookies()
+        self.cfg.setdefault("profiles", {})[name] = {"cookies": cookies}
+        save_config(self.cfg)
+        self.status("Profile '%s' saved." % name)
+
+    def _load_profile(self):
+        name = self.profile_name.get().strip()
+        prof = (self.cfg.get("profiles") or {}).get(name)
+        if not prof:
+            self.status("No profile named '%s'." % name)
+            return
+        self.api = VRChatAPI()
+        self.api.load_cookies(prof.get("cookies", {}))
+        try:
+            me = self.api.me()
+            self.cfg["vrchat_cookies"] = self.api.cookies()
+            save_config(self.cfg)
+            self.vrc_me_label.config(
+                text="Switched to '%s': %s" % (name, me.get("displayName", "?")))
+            self.status("Profile switched.")
+        except Exception as e:
+            self.status("Profile session expired: %s" % str(e)[:60])
+
     def _load_friends(self):
         def work():
             try:
-                friends = self.api.friends_online()
+                friends = self.api.friends_online(
+                    include_offline=self.friends_offline.get())
 
                 def fill():
                     self.friends_tree.delete(*self.friends_tree.get_children())
@@ -1281,6 +1329,14 @@ class VRCHubApp(tk.Tk):
                         variable=self.hr_relay).grid(row=0, column=3)
         self.hr_label = ttk.Label(hr, text="— BPM")
         self.hr_label.grid(row=0, column=4, padx=10)
+        ttk.Label(hr, text="Pulsoid token:").grid(row=1, column=0, sticky="w")
+        self.pul_token = ttk.Entry(hr, width=18)
+        self.pul_token.grid(row=1, column=1, columnspan=2, sticky="w", padx=4)
+        self.pul_btn = ttk.Button(hr, text="Connect",
+                                  command=self._toggle_pulsoid)
+        self.pul_btn.grid(row=1, column=2, padx=4)
+        ttk.Label(hr, text="(alternative HR source; get a token at "
+                           "pulsoid.net)").grid(row=1, column=3, sticky="w")
 
         f.columnconfigure(0, weight=1)
 
@@ -1359,6 +1415,56 @@ class VRCHubApp(tk.Tk):
         except Exception as e:
             self.twitch = None
             self.status("Twitch connect failed: %s" % e)
+
+    def _toggle_pulsoid(self):
+        if self.pul_running:
+            self.pul_running = False
+            if self.pul_ws:
+                self.pul_ws.close()
+            self.pul_btn.config(text="Connect")
+            self.status("Pulsoid off.")
+            return
+        token = self.pul_token.get().strip()
+        if not token:
+            self.status("Paste a Pulsoid token first.")
+            return
+
+        def run():
+            self.pul_running = True
+            self.pul_btn.config(text="Disconnect")
+            ws = WSClient("wss://dev.pulsoid.net/api/v1/data/real-time"
+                          "?access_token=" + token)
+            self.pul_ws = ws
+            last_sent = 0
+            try:
+                ws.connect()
+                while self.pul_running:
+                    msg = ws.recv(timeout=20)
+                    try:
+                        d = json.loads(msg)
+                    except (ValueError, TypeError):
+                        continue
+                    data = d.get("data", d)
+                    bpm = data.get("heart_rate") or data.get("bpm") or d.get("bpm")
+                    if not bpm:
+                        continue
+
+                    def show(b=bpm):
+                        self.hr_label.config(text="%s BPM" % b)
+                        if (self.hr_relay.get() and
+                                time.time() - last_sent > 10):
+                            self.osc.chatbox("Heart: %s BPM" % b)
+                    self.after(0, show)
+                    last_sent = time.time()
+            except Exception as e:
+                if self.pul_running:
+                    self.after(0, lambda: self.status(
+                        "Pulsoid error: %s" % e.__class__.__name__))
+            finally:
+                self.pul_running = False
+
+        threading.Thread(target=run, daemon=True).start()
+        self.status("Connecting to Pulsoid...")
 
     def _toggle_hr(self):
         if self.hr_running:
@@ -1598,12 +1704,69 @@ class VRCHubApp(tk.Tk):
         ttk.Button(ss, text="Check now", command=self._sysstat_check_show).grid(
             row=0, column=4)
 
+        ps = ttk.LabelFrame(f, text="PiShock (VRCOSC module - YOUR collar "
+                                    "only)", padding=6)
+        ps.grid(row=4, column=0, sticky="ew", pady=3)
+        ttk.Label(ps, text="User:").grid(row=0, column=0)
+        self.ps_user = ttk.Entry(ps, width=12)
+        self.ps_user.grid(row=0, column=1, padx=3)
+        ttk.Label(ps, text="API key:").grid(row=0, column=2)
+        self.ps_key = ttk.Entry(ps, width=14, show="*")
+        self.ps_key.grid(row=0, column=3, padx=3)
+        ttk.Label(ps, text="Code:").grid(row=0, column=4)
+        self.ps_code = ttk.Entry(ps, width=8)
+        self.ps_code.grid(row=0, column=5, padx=3)
+        ttk.Button(ps, text="Test vibe", command=lambda:
+                   self._pishock(1, 20, 1)).grid(row=0, column=6, padx=4)
+        ttk.Button(ps, text="Shock (low, 1s)", command=lambda:
+                   self._pishock(0, 5, 1)).grid(row=0, column=7, padx=4)
+        ttk.Label(ps, text="settings stay in this session only").grid(
+            row=0, column=8, padx=6)
+
         self.extras_log = scrolledtext.ScrolledText(f, height=6,
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
         self.extras_log.grid(row=4, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
+
+    def _pishock(self, op, intensity, duration):
+        """PiShock web API. Op: 0=shock, 1=vibrate, 2=beep."""
+        payload = {
+            "Username": self.ps_user.get().strip(),
+            "Apikey": self.ps_key.get().strip(),
+            "Code": self.ps_code.get().strip(),
+            "Name": "VRCHub",
+            "Op": op,
+            "Intensity": intensity,
+            "Duration": duration,
+        }
+        if not all((payload["Username"], payload["Apikey"], payload["Code"])):
+            self.status("Fill PiShock user/key/code first.")
+            return
+
+        def work():
+            try:
+                req = urllib.request.Request(
+                    "https://do.pishock.com/api/apioperate",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json",
+                             "User-Agent": "VRCHub/" + APP_VERSION})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    body = resp.read().decode("utf-8", "replace")[:80]
+
+                def ok():
+                    self._log_to(self.extras_log, "PiShock ok: %s" % body)
+                    self.status("PiShock sent.")
+                self.after(0, ok)
+            except Exception as e:
+                msg = "PiShock failed: %s" % e.__class__.__name__
+
+                def bad():
+                    self._log_to(self.extras_log, msg)
+                self.after(0, bad)
+        threading.Thread(target=work, daemon=True).start()
+        self.status("PiShock sending...")
 
     def _toggle_afk(self):
         if self.afk_running:
