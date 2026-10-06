@@ -74,6 +74,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.9 — VRCNext parity** | |
+| Full VRCNext feature sweep: profile editor (status/bio/pronouns/languages), VRChat messenger (invite/response/requestInvite), instance creator + self-invite + multi-friend invites + join-friend's-world, "who is with me", friend request/unfriend/mutuals, groups (list/search/join/leave), VRC+ gallery management, local playtime stats (time per world, time with each friend) + timeline; avatar list now shows PC/Quest + CURRENT badges; launcher adds SlimeVR/VRCVideoCacher/VRCFaceTracking | VRCNext |
 | **NEW in 5.7** | |
 | Discord Rich Presence (stdlib IPC, JSON frames, own App ID) - status on your Discord profile; Rules engine - IF param ==/>/< value THEN chatbox or param action, saved in config | user request |
 | **NEW in 5.6** | |
