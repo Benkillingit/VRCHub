@@ -53,7 +53,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.7.0"
+APP_VERSION = "5.8.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1021,6 +1021,25 @@ class VRCHubApp(tk.Tk):
         self._tab_tools(nb)
         self._tab_face(nb)
         self._tab_help(nb)
+        self.nb = nb
+        menubar = tk.Menu(self)
+        categories = {
+            "Chat & Comm": [("Chatbox", 0), ("AI Chat", 1),
+                            ("Media & Chat", 4)],
+            "Avatar & Params": [("VRChat API", 2), ("Avatar Params", 3),
+                                ("Worlds", 5), ("Face Track", 9)],
+            "Social & Presence": [("Connections", 8)],
+            "Hardware & Home": [("Extras", 6)],
+            "Desktop & Tools": [("Launcher", 11)],
+            "Extend & Help": [("Plugins", 7), ("Help", 10)],
+        }
+        for cat, items in categories.items():
+            m = tk.Menu(menubar, tearoff=0)
+            for label, idx in items:
+                m.add_command(label=label,
+                               command=lambda i=idx: nb.select(i))
+            menubar.add_cascade(label=cat, menu=m)
+        self.config(menu=menubar)
         self._banner_refresh()
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
