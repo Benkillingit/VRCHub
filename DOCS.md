@@ -97,6 +97,15 @@ VRChat caps your in-game favorites; VRCHub doesn't. The **Saved avatars** panel 
 - **Equip saved** — switches avatar via OSC `/avatar/change`. Works even when logged out, but you must be in a world.
 - **Delete** — removes it from your vault only.
 
+### Cloud vault sync (4.4)
+The vault is now a real database in the cloud, not just a local file:
+- **Create repo** — makes a *private* `vrchub-data` repo under your GitHub account (or point the field at any repo you own).
+- **Push** — uploads your saved avatars to `saved_avatars.json` in that repo. Nothing public; a private repo is only visible to your token.
+- **Pull** — downloads and merges the cloud list into the local vault (union by avatar ID, nothing is lost or overwritten). Run VRCHub on any PC, paste the same token, hit Pull, and your avatars are there.
+- The token is stored in `vrchub_config.json` on each machine you use — treat it like a password. Revoke it on GitHub (Settings → Developer settings) if a machine is lost.
+
+Why GitHub and not "all the avatar databases": there is no public upload API on third-party avatar database sites. VRCHub's own cloud database is the one you control.
+
 Login note: the **Email or username** field accepts either — VRChat's login takes your VRChat username as well as the email on file.
 
 ### VRChat input controls & OSC avatar switch (4.2)
