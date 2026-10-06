@@ -54,7 +54,18 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.4.2"
+APP_VERSION = "6.5.0"
+
+# VRCNext-style dark palette
+VRN_BG = "#15171c"      # window background
+VRN_PANEL = "#1c2027"   # cards / buttons
+VRN_SIDE = "#101216"   # sidebar
+VRN_ACCENT = "#4f9cf9"  # accent blue
+VRN_FG = "#e8ebf2"      # main text
+VRN_MUTED = "#8b93a4"   # secondary text
+VRN_FIELD = "#11131a"   # input fields
+VRN_HOVER = "#242b38"   # hover
+VRN_SEL = "#22314f"     # selected nav
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
 ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 TOGETHER_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_together.json")
@@ -1148,14 +1159,15 @@ class VRCHubApp(tk.Tk):
         self._loop_running = False
         self.title("%s %s — your VRChat toolkit in one place"
                    % (APP_NAME, APP_VERSION))
-        self.geometry("840x600")
-        self.minsize(720, 520)
+        self.geometry("980x640")
+        self.minsize(860, 560)
         self.plugins = load_plugins()
         for p in self.plugins:
             try:
                 p.init(self)
             except Exception:
                 pass
+        self._apply_vrcnext_theme()
         self._build_ui()
         self._try_session()
 
@@ -1194,6 +1206,164 @@ class VRCHubApp(tk.Tk):
             self.status("CHEAT CODE ACCEPTED: 30 extra lives (ghost "
                         "edition).")
 
+    def _apply_vrcnext_theme(self):
+        """Dark VRCNext-style theme for all ttk widgets."""
+        st = ttk.Style(self)
+        try:
+            st.theme_use("clam")
+        except tk.TclError:
+            pass
+        st.configure(".", background=VRN_BG, foreground=VRN_FG,
+                      font=("Segoe UI", 10), borderwidth=0)
+        st.configure("TFrame", background=VRN_BG)
+        st.configure("TLabel", background=VRN_BG, foreground=VRN_FG)
+        st.configure("TLabelframe", background=VRN_BG,
+                      bordercolor="#2a2f3a", relief="flat")
+        st.configure("TLabelframe.Label", background=VRN_BG,
+                      foreground=VRN_MUTED)
+        st.configure("TButton", background=VRN_PANEL, foreground=VRN_FG,
+                      borderwidth=0, padding=(10, 4))
+        st.map("TButton",
+               background=[("pressed", VRN_ACCENT),
+                           ("active", VRN_HOVER)],
+               foreground=[("disabled", VRN_MUTED)])
+        st.configure("TEntry", fieldbackground=VRN_FIELD,
+                     foreground=VRN_FG, insertcolor=VRN_FG,
+                     bordercolor="#2a2f3a", lightcolor="#2a2f3a",
+                     darkcolor="#2a2f3a", padding=3)
+        st.map("TEntry", bordercolor=[("focus", VRN_ACCENT)],
+               lightcolor=[("focus", VRN_ACCENT)],
+               darkcolor=[("focus", VRN_ACCENT)])
+        st.configure("TCombobox", fieldbackground=VRN_FIELD,
+                     background=VRN_PANEL, foreground=VRN_FG,
+                     arrowcolor=VRN_MUTED, bordercolor="#2a2f3a",
+                     lightcolor="#2a2f3a", darkcolor="#2a2f3a")
+        st.map("TCombobox",
+               fieldbackground=[("readonly", VRN_FIELD)],
+               bordercolor=[("focus", VRN_ACCENT)],
+               lightcolor=[("focus", VRN_ACCENT)],
+               darkcolor=[("focus", VRN_ACCENT)])
+        st.configure("TSpinbox", fieldbackground=VRN_FIELD,
+                     background=VRN_PANEL, foreground=VRN_FG,
+                     arrowcolor=VRN_MUTED, bordercolor="#2a2f3a",
+                     lightcolor="#2a2f3a", darkcolor="#2a2f3a")
+        st.configure("TCheckbutton", background=VRN_BG,
+                      foreground=VRN_FG, focuscolor=VRN_ACCENT)
+        st.map("TCheckbutton", background=[("active", VRN_BG)],
+               indicatorcolor=[("selected", VRN_ACCENT)])
+        st.configure("TRadiobutton", background=VRN_BG, foreground=VRN_FG)
+        st.map("TRadiobutton", background=[("active", VRN_BG)],
+               indicatorcolor=[("selected", VRN_ACCENT)])
+        st.configure("TScale", background=VRN_BG, troughcolor=VRN_FIELD,
+                      bordercolor="#2a2f3a", lightcolor=VRN_ACCENT,
+                      darkcolor=VRN_ACCENT)
+        st.configure("TProgressbar", troughcolor=VRN_FIELD,
+                      background=VRN_ACCENT, bordercolor=VRN_BG,
+                      lightcolor=VRN_ACCENT, darkcolor=VRN_ACCENT)
+        st.configure("TNotebook", background=VRN_BG, borderwidth=0,
+                      tabmargins=(0, 0, 0, 0))
+        st.configure("TNotebook.Tab", background=VRN_BG,
+                      foreground=VRN_MUTED, padding=(0, 0),
+                      borderwidth=0, focuscolor=VRN_BG)
+        st.map("TNotebook.Tab",
+               background=[("selected", VRN_BG)])
+        try:
+            st.layout("TNotebook.Tab", [])   # hide tab strip
+        except tk.TclError:
+            pass
+        st.configure("Treeview", background=VRN_PANEL,
+                     fieldbackground=VRN_PANEL, foreground=VRN_FG,
+                     bordercolor="#2a2f3a", rowheight=24)
+        st.configure("Treeview.Heading", background=VRN_HOVER,
+                     foreground=VRN_MUTED, relief="flat", borderwidth=0)
+        st.map("Treeview", background=[("selected", VRN_SEL)],
+               foreground=[("selected", "#ffffff")])
+        st.configure("TScrollbar", background=VRN_PANEL,
+                     troughcolor=VRN_BG, borderwidth=0,
+                     arrowcolor=VRN_MUTED, relief="flat")
+        st.map("TScrollbar", background=[("active", VRN_HOVER)])
+
+    def _nav_build(self, nav):
+        """Build the VRCNext-style left sidebar."""
+        side = self._nav_side
+        hdr = tk.Label(side, text="VRCHub", bg=VRN_SIDE, fg="#ffffff",
+                       font=("Segoe UI", 16, "bold"))
+        hdr.pack(anchor="w", padx=18, pady=(16, 0))
+        tk.Label(side, text="v%s" % APP_VERSION, bg=VRN_SIDE,
+                 fg=VRN_MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w", padx=18,
+                                            pady=(0, 8))
+        for cat, items in nav:
+            tk.Label(side, text=cat, bg=VRN_SIDE, fg=VRN_MUTED,
+                     font=("Segoe UI", 8, "bold")).pack(
+                anchor="w", padx=18, pady=(10, 3))
+            for label, idx in items:
+                b = tk.Label(side, text="  " + label, bg=VRN_SIDE,
+                             fg=VRN_FG, font=("Segoe UI", 10),
+                             anchor="w", padx=10, pady=4,
+                             cursor="hand2")
+                b.pack(fill="x", padx=8, pady=1)
+                b.bind("<Button-1>",
+                       lambda e, i=idx: self._nav_select(i))
+                b.bind("<Enter>", lambda e, w=b, i=idx: (
+                    w.config(bg=VRN_HOVER)
+                    if self._nav_btns.get(i) is not w else None))
+                b.bind("<Leave>", lambda e, w=b, i=idx: (
+                    w.config(bg=VRN_SIDE)
+                    if self._nav_btns.get(i) is not w else None))
+                self._nav_btns[idx] = b
+        self._nav_select(0)
+
+    def _nav_select(self, idx):
+        """Switch tab and highlight the sidebar entry."""
+        try:
+            self.nb.select(idx)
+        except tk.TclError:
+            pass
+        for i, b in self._nav_btns.items():
+            if i == idx:
+                b.config(bg=VRN_SEL, fg="#ffffff")
+            else:
+                b.config(bg=VRN_SIDE, fg=VRN_FG)
+
+    def _dark_walk(self, w=None):
+        """Recolor classic (non-ttk) widgets to the dark palette."""
+        if w is None:
+            w = self
+        for c in w.winfo_children():
+            try:
+                if isinstance(c, tk.Text):
+                    c.config(bg=VRN_FIELD, fg=VRN_FG,
+                             insertbackground=VRN_FG,
+                             selectbackground=VRN_SEL,
+                             relief="flat", borderwidth=0,
+                             highlightthickness=1,
+                             highlightbackground="#2a2f3a",
+                             highlightcolor=VRN_ACCENT)
+                elif isinstance(c, (tk.Entry, tk.Listbox)):
+                    c.config(bg=VRN_FIELD, fg=VRN_FG,
+                             insertbackground=VRN_FG,
+                             relief="flat", borderwidth=0,
+                             highlightthickness=1,
+                             highlightbackground="#2a2f3a",
+                             highlightcolor=VRN_ACCENT)
+                elif isinstance(c, tk.Button):
+                    c.config(bg=VRN_PANEL, fg=VRN_FG,
+                             activebackground=VRN_HOVER,
+                             activeforeground="#ffffff",
+                             relief="flat", bd=0,
+                             highlightthickness=0)
+                elif isinstance(c, tk.Label):
+                    if str(c.cget("bg")) in ("SystemButtonFace",
+                                             "SystemWindow"):
+                        c.config(bg=VRN_BG, fg=VRN_FG)
+                elif isinstance(c, tk.Canvas):
+                    if str(c.cget("bg")) != VRN_SIDE:
+                        c.config(bg=VRN_BG)
+            except tk.TclError:
+                pass
+            self._dark_walk(c)
+
     def _build_ui(self):
         self.status_var = tk.StringVar(value="Ready.")
         self._banner_build()
@@ -1201,7 +1371,12 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=self._activity_loop, daemon=True).start()
         threading.Thread(target=self._together_loop, daemon=True).start()
         nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=6, pady=6)
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True)
+        side = tk.Frame(wrap, bg=VRN_SIDE, width=200)
+        side.pack(side="left", fill="y")
+        side.pack_propagate(False)
+        nb.pack(side="left", fill="both", expand=True, padx=6, pady=6)
         self._tab_chatbox(nb)
         self._tab_ai(nb)
         self._tab_api(nb)
@@ -1219,25 +1394,22 @@ class VRCHubApp(tk.Tk):
         if self.cfg.get("launch_on_start"):
             self.after(8000, self._launch_all)
         self.nb = nb
-        menubar = tk.Menu(self)
-        categories = {
-            "Chat & Comm": [("Chatbox", 0), ("AI Chat", 1),
-                            ("Media & Chat", 4)],
-            "Avatar & Params": [("VRChat API", 2), ("Avatar Params", 3),
-                                ("Worlds", 5), ("Face Track", 9)],
-            "Social & Presence": [("Connections", 8), ("VRCNext+", 12)],
-            "Hardware & Home": [("Extras", 6)],
-            "Desktop & Tools": [("Launcher", 11)],
-            "Extend & Help": [("Plugins", 7), ("Help", 10)],
-        }
-        for cat, items in categories.items():
-            m = tk.Menu(menubar, tearoff=0)
-            for label, idx in items:
-                m.add_command(label=label,
-                               command=lambda i=idx: nb.select(i))
-            menubar.add_cascade(label=cat, menu=m)
-        self.config(menu=menubar)
+        self._nav_side = side
+        self._nav_btns = {}
+        nav = [
+            ("SOCIAL", [("Chatbox", 0), ("AI Chat", 1),
+                        ("Media & Chat", 4)]),
+            ("VRCHAT", [("VRChat API", 2), ("Web API", 11),
+                        ("Worlds", 5), ("Avatar Params", 3)]),
+            ("AVATAR & DEVICE", [("Face Track", 9),
+                                 ("Connections", 8)]),
+            ("TOOLS", [("Extras", 6), ("Launcher", 13),
+                       ("Plugins", 7)]),
+            ("INFO", [("Help", 10), ("VRCNext+", 12)]),
+        ]
+        self.after(60, lambda: self._nav_build(nav))
         self._banner_refresh()
+        self._dark_walk()
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
         ttk.Label(sb, textvariable=self.status_var, anchor="w",
