@@ -17,6 +17,8 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 5.6** | |
+| Phone keyboard (local web page on your phone -> VRChat chatbox, same WiFi), param smoothing (OSCmooth-style), movement nudge sliders (/input/, OSCLeash-style) | ecosystem sweep 3 |
 | **NEW in 5.5** | |
 | One-click setup: `install.bat` (Windows) / `install.sh` checks Python, installs all optional extras (Pillow, tinytuya, face-tracking on demand), creates plugins folder | user request |
 | **NEW in 5.4** | |
