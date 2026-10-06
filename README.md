@@ -17,6 +17,11 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 3.3 — more from the trackers** | |
+| Clock in chatbox | VRCOSC (clock module) |
+| Media + hardware stats combined in one chatbox line | VRCOSC (most-commented request) |
+| "Only announce on track change" media option | VRCOSC (feature request) |
+| Fixed: Extras panel overlap bug (PiShock log) | |
 | **NEW in 3.2 — top-voted user requests from all five apps' GitHub trackers** | |
 | Avatar wear-time tracking | VRCX (7👍) |
 | Avatar memos (your notes per avatar) | VRCX (6👍) |
