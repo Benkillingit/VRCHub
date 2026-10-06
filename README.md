@@ -17,6 +17,11 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 3.1** | |
+| Multi-account profiles — save/load several VRChat sessions | VRCNext |
+| Pulsoid heart rate (alternative to HypeRate, token at pulsoid.net) | VRCOSC |
+| PiShock module (your collar only, session-only settings) | VRCOSC |
+| Friends list: include-offline toggle | VRCX |
 | **NEW in 3.0** | |
 | World search + live instances + join via launch link | VRCX |
 | Notifications feed (+ accept/hide) | VRCX |
