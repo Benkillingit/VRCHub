@@ -52,8 +52,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 
 APP_NAME = "VRCHub"
-APP_VERSION = "5.0.0"
+APP_VERSION = "5.1.0"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_config.json")
+ACTIVITY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vrchub_activity.json")
 
 
 # ================================================================ OSC engine
@@ -945,6 +946,8 @@ class VRCHubApp(tk.Tk):
     def _build_ui(self):
         self.status_var = tk.StringVar(value="Ready.")
         self._banner_build()
+        self._server_check(first=True)
+        threading.Thread(target=self._activity_loop, daemon=True).start()
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=6, pady=6)
         self._tab_chatbox(nb)
@@ -1436,6 +1439,7 @@ class VRCHubApp(tk.Tk):
         def work():
             try:
                 me = self.api.login(user, pw, totp)
+                self._me = me
                 self.cfg["vrchat_cookies"] = self.api.cookies()
                 save_config(self.cfg)
 
@@ -1864,6 +1868,20 @@ class VRCHubApp(tk.Tk):
         med = ttk.LabelFrame(f, text="Media status (MagicChatbox/Nexus: show "
                                      "what you're doing)", padding=6)
         med.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        ly = ttk.LabelFrame(f, text="Lyrics in chatbox (LRCLIB, free)",
+                            padding=6)
+        ly.grid(row=1, column=0, sticky="ew", pady=4)
+        ttk.Label(ly, text="Artist:").grid(row=0, column=0)
+        self.ly_artist = ttk.Entry(ly, width=18)
+        self.ly_artist.grid(row=0, column=1, padx=4)
+        ttk.Label(ly, text="Title:").grid(row=0, column=2)
+        self.ly_title = ttk.Entry(ly, width=18)
+        self.ly_title.grid(row=0, column=3, padx=4)
+        self.ly_btn = ttk.Button(ly, text="Start lyrics",
+                                 command=self._toggle_lyrics)
+        self.ly_btn.grid(row=0, column=4, padx=6)
+        self.ly_state = ttk.Label(ly, text="off")
+        self.ly_state.grid(row=0, column=5, padx=4)
         self.window_list = tk.Listbox(med, height=4)
         self.window_list.pack(side="left", fill="x", expand=True)
         side = ttk.Frame(med)
@@ -2372,8 +2390,43 @@ class VRCHubApp(tk.Tk):
         self._ban_url.insert(0, self.cfg.get("ban_url", ""))
         self._ban_url.pack(side="left", padx=2)
         bf.grid(row=7, column=0, sticky="ew", pady=3)
+        sp = ttk.LabelFrame(f, text="Social status presets (VRChat API)",
+                            padding=6)
+        sp.grid(row=8, column=0, sticky="ew", pady=3)
+        srow = ttk.Frame(sp); srow.pack(fill="x")
+        ttk.Label(srow, text="Status:").pack(side="left")
+        self.sp_status = ttk.Combobox(srow, width=8, state="readonly",
+                                     values=("active", "join me",
+                                             "ask me", "busy"))
+        self.sp_status.set("active")
+        self.sp_status.pack(side="left", padx=3)
+        ttk.Label(srow, text="Description:").pack(side="left")
+        self.sp_desc = ttk.Entry(srow, width=24)
+        self.sp_desc.pack(side="left", padx=3)
+        self.sp_name = ttk.Entry(srow, width=12)
+        self.sp_name.insert(0, "preset name")
+        self.sp_name.pack(side="left", padx=3)
+        ttk.Button(srow, text="Save", width=6,
+                   command=self._status_preset_save).pack(side="left",
+                                                          padx=3)
+        ttk.Button(srow, text="Apply", width=7,
+                   command=self._status_preset_apply).pack(side="left",
+                                                           padx=3)
+        ttk.Label(srow, text="(login first; presets save to config)"
+                  ).pack(side="left", padx=6)
+
+        sv = ttk.Frame(f)
+        sv.grid(row=9, column=0, sticky="ew", pady=3)
+        self.srv_label = ttk.Label(sv, text="VRChat servers: ?")
+        self.srv_label.pack(side="left")
+        ttk.Button(sv, text="Check now", width=10,
+                   command=self._server_check).pack(side="left", padx=6)
+        ttk.Button(sv, text="Activity heatmap", width=15,
+                   command=self._heatmap_show).pack(side="left", padx=6)
+        ttk.Label(sv, text="(tracks hours while VRCHub runs)"
+                  ).pack(side="left", padx=4)
         cd = ttk.LabelFrame(f, text="Countdown in chatbox", padding=6)
-        cd.grid(row=8, column=0, sticky="ew", pady=3, columnspan=1)
+        cd.grid(row=10, column=0, sticky="ew", pady=3, columnspan=1)
         ttk.Label(cd, text="Minutes:").grid(row=0, column=0)
         self.cd_mins = ttk.Spinbox(cd, from_=1, to=180, width=5, value=5)
         self.cd_mins.grid(row=0, column=1, padx=4)
@@ -2387,7 +2440,7 @@ class VRCHubApp(tk.Tk):
                                                     state="disabled",
                                                     font=("Consolas", 9),
                                                     wrap="word")
-        self.extras_log.grid(row=10, column=0, sticky="ew", pady=(8, 0))
+        self.extras_log.grid(row=11, column=0, sticky="ew", pady=(8, 0))
         f.columnconfigure(0, weight=1)
 
     def _pishock(self, op, intensity, duration):
@@ -2584,6 +2637,177 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
         self.status("Light sync on (Ctrl+ not needed; stop = same "
                     "button).")
+
+    # ---- lyrics (LRCLIB)
+
+    def _toggle_lyrics(self):
+        if getattr(self, "_ly_on", False):
+            self._ly_on = False
+            self.ly_state.config(text="off")
+            self.ly_btn.config(text="Start lyrics")
+            self.status("Lyrics stopped.")
+            return
+        artist = self.ly_artist.get().strip()
+        title = self.ly_title.get().strip()
+        if not title:
+            self.status("Lyrics: enter a title.")
+            return
+
+        def work():
+            try:
+                url = ("https://lrclib.net/api/search?track_name=%s"
+                       "&artist_name=%s" % (
+                           urllib.parse.quote(title),
+                           urllib.parse.quote(artist)))
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": VRCAPI.UA})
+                hits = json.load(urllib.request.urlopen(req, timeout=15))
+            except Exception as e:
+                self.after(0, lambda: self.status(
+                    "Lyrics fetch failed: %s" % str(e)[:40]))
+                return
+            lines = []
+            for h in hits or []:
+                synced = h.get("syncedLyrics") or ""
+                if "[" in synced:
+                    lines = [
+                        (int(m.group(1)) * 60 + float(m.group(2)), t)
+                        for m, t in (
+                            (re.match(r"\[(\d+):(\d+(?:\.\d+)?)\]",
+                                      ln), ln.split("]", 1)[-1].strip())
+                            for ln in synced.splitlines()) if m]
+                    if lines:
+                        break
+            if not lines:
+                self.after(0, lambda: self.status(
+                    "Lyrics: no synced lyrics found for that track."))
+                return
+            self._ly_on = True
+            self.after(0, lambda: (self.ly_state.config(text="ON"),
+                                   self.ly_btn.config(
+                                       text="Stop lyrics"),
+                                   self.status(
+                                       "Lyrics ON (%d lines) - start your "
+                                       "music now." % len(lines))))
+            start = time.time()
+            idx = -1
+            while getattr(self, "_ly_on", False):
+                t = time.time() - start
+                while (idx + 1 < len(lines) and t >= lines[idx + 1][0]):
+                    idx += 1
+                    self.osc.chatbox("\u266a " + lines[idx][1][:140])
+                time.sleep(0.5)
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- status presets
+
+    def _status_preset_save(self):
+        name = self.sp_name.get().strip()
+        if not name:
+            self.status("Preset: give it a name first.")
+            return
+        presets = self.cfg.get("status_presets", {})
+        presets[name] = (self.sp_status.get(), self.sp_desc.get().strip())
+        self.cfg["status_presets"] = presets
+        save_config(self.cfg)
+        self.status('Saved preset "%s".' % name)
+
+    def _status_preset_apply(self):
+        name = self.sp_name.get().strip()
+        preset = self.cfg.get("status_presets", {}).get(name)
+        if preset:
+            status, desc = preset
+        else:
+            status, desc = self.sp_status.get(), self.sp_desc.get().strip()
+        me = getattr(self, "_me", None)
+        if not me or not me.get("id"):
+            self.status("Status: log into VRChat API first.")
+            return
+
+        def work():
+            code, text = self.api._request(
+                "PUT", "/users/%s" % me["id"],
+                data={"status": status, "statusDescription": desc})
+            msg = ("Status set: %s%s." % (
+                status, " (%s)" % desc if desc else "")
+                   if code in (200, 201)
+                else "Status failed: %s" % text[:60])
+            self.after(0, lambda: self.status(msg))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- server status
+
+    def _server_check(self, first=False):
+        def work():
+            try:
+                req = urllib.request.Request(
+                    "https://status.vrchat.com/api/v2/status.json",
+                    headers={"User-Agent": VRCAPI.UA})
+                d = json.load(urllib.request.urlopen(req, timeout=10))
+                txt = "VRChat servers: " + str(d.get("status", "?"))
+            except Exception:
+                txt = "VRChat servers: unreachable"
+            self.after(0, lambda: self.srv_label.config(text=txt))
+        threading.Thread(target=work, daemon=True).start()
+        if not first:
+            self.status("Server status checked.")
+        self.after(300000, lambda: self._server_check(first=True))
+
+    # ---- activity heatmap
+
+    def _activity_loop(self):
+        """Count one bucket per minute while VRCHub runs."""
+        last_save = 0
+        while True:
+            key = time.strftime("%Y-%m-%d %H")
+            try:
+                data = json.load(open(ACTIVITY_FILE))
+            except Exception:
+                data = {}
+            data[key] = data.get(key, 0) + 1
+            if time.time() - last_save > 240:
+                try:
+                    json.dump(data, open(ACTIVITY_FILE, "w"))
+                    last_save = time.time()
+                except OSError:
+                    pass
+            time.sleep(60)
+
+    def _heatmap_show(self):
+        try:
+            data = json.load(open(ACTIVITY_FILE))
+        except Exception:
+            data = {}
+        grid = [[0] * 24 for _ in range(7)]  # [dow][hour]
+        for key, n in data.items():
+            try:
+                dt = time.strptime(key, "%Y-%m-%d %H")
+                grid[dt.tm_wday][dt.tm_hour] += n
+            except ValueError:
+                continue
+        peak = max((v for row in grid for v in row), default=0) or 1
+        win = tk.Toplevel(self)
+        win.title("Your activity (Mon-Sun x hour)")
+        cv = tk.Canvas(win, width=24 * 22 + 60, height=7 * 22 + 40,
+                       bg="#1c1c1c")
+        cv.pack(padx=8, pady=8)
+        days = "MTWTFSS"
+        for d in range(7):
+            cv.create_text(16, 24 + d * 22, text=days[d], fill="#aaa")
+            for h in range(24):
+                inten = grid[d][h] / peak
+                c = "#3c4043" if grid[d][h] == 0 else "#%02x%02x%02x" % (
+                    int(40 + 215 * inten), int(44 + 130 * (1 - inten) ** 2),
+                    int(48 + 60 * (1 - inten)))
+                cv.create_rectangle(30 + h * 22, 12 + d * 22,
+                                    50 + h * 22, 30 + d * 22,
+                                    fill=c, outline="#111")
+                if d == 0 and h % 3 == 0:
+                    cv.create_text(40 + h * 22, 178, text=str(h),
+                                   fill="#888", font=("Segoe UI", 7))
+        cv.create_text(30, 190, anchor="w", fill="#aaa",
+                       text="Bucket = minutes VRCHub was running; bright = "
+                            "peak. Builds history the longer you use it.")
 
     def _banner_build(self):
         """Slim top banner (ad slot). Hidden unless enabled."""
