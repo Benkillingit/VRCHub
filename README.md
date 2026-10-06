@@ -17,6 +17,9 @@
 | Twitch chat relay → chatbox (anonymous read) | VRCOSC |
 | HypeRate heart rate → chatbox (WebSocket) | VRCOSC |
 | Launcher: VRChat / VRCX / VRCOSC / MagicChatbox, autodetect, launch-all | VRCNext |
+| **NEW in 4.2** | |
+| VRChat native input controls — Run, Walk, Comfort turn, Drop, Grab, Use, Voice, Panic (official /input/ endpoints) | VRChat OSC |
+| Switch avatar by avtr_ ID via OSC — no login needed | VRCX-style |
 | **NEW in 4.1** | |
 | Face tracking tab — webcam blendshapes to VRChat FT params (optional pip deps) | VRCFT-style |
 | **NEW in 4.0** | |
