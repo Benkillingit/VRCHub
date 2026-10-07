@@ -1,0 +1,39 @@
+# Base44 sandbox environment for VRCHub.
+#
+# VRCHub is a single-file Tkinter desktop app (vrchub.py), not a web app, so the
+# sandbox runs it the only way a browser preview can show it: on a virtual X
+# display (Xvfb), exported by x11vnc and served in-browser by noVNC/websockify
+# on host port 3000.
+#
+# The source is bind-mounted and dependencies come from the image, so edits to
+# vrchub.py are picked up without an image rebuild.
+services:
+  vrchub:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    command: ["sh", "-ec", "sh /app/.base44/start.sh"]
+    working_dir: /app
+    ports:
+      - "3000:3000"           # noVNC client = the preview entry point
+    volumes:
+      - ./:/app               # live source (never baked into the image)
+      - vrchub_data:/root/VRCHub   # app config/plugins survive container restarts
+    environment:
+      - BASE44_PREVIEW_MODE
+      - DISPLAY=:99
+      - HOME=/root
+      # Tk/X11 need a UTF-8 locale or the window title and emoji labels are
+      # mangled ("failure in conversion from UTF8_STRING").
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "sh /app/.base44/healthcheck.sh"]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 45s
+
+volumes:
+  vrchub_data:
