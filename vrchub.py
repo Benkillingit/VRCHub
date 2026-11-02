@@ -55,7 +55,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.8.0"
+APP_VERSION = "6.8.1"
 
 # VRCNext-style dark palette
 VRN_BG = "#0a0a0b"      # window background
@@ -318,6 +318,31 @@ class VRChatAPI:
 
     # ---- features
 
+    def _as_list(self, text, what):
+        """Return a real list or raise a readable error.
+
+        VRChat answers a failed call with an object like
+        {"error": {"message": "..."}}. The old code iterated whatever came
+        back, so an expired session produced "TypeError: string indices
+        must be integers, not 'str'" inside the UI instead of a message.
+        """
+        data = self._json(text)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict) and err.get("message"):
+                raise RuntimeError("%s: %s" % (what, err["message"]))
+            if isinstance(err, str) and err:
+                raise RuntimeError("%s: %s" % (what, err))
+            for key in ("favorites", "data", "results", "items"):
+                if isinstance(data.get(key), list):
+                    return data[key]
+        elif isinstance(data, str):
+            raise RuntimeError("%s: unexpected response %r"
+                               % (what, data[:80]))
+        raise RuntimeError("%s: unexpected response" % what)
+
     def friends_online(self, include_offline=False):
         status, text = self._request(
             "GET", "/friends?offline=%s&n=100&order=last_login"
@@ -325,7 +350,7 @@ class VRChatAPI:
         if status != 200:
             raise RuntimeError("Could not load friends: " + text[:120])
         out = []
-        for f in self._json(text):
+        for f in self._as_list(text, "Could not load friends"):
             out.append({
                 "id": f.get("id", ""),
                 "name": f.get("displayName", "?"),
@@ -367,7 +392,8 @@ class VRChatAPI:
         return [{"id": w.get("id"), "name": w.get("name", "?"),
                  "author": w.get("authorName", "?"),
                  "occupants": w.get("occupants", 0)}
-                for w in self._json(text)]
+                for w in self._as_list(text, "World search")]
+        
 
     def world_instances(self, world_id):
         status, text = self._request("GET", "/worlds/%s"
@@ -473,14 +499,16 @@ class VRChatAPI:
         status, text = self._request("GET", "/groups/%s/joined?n=100" % uid)
         if status != 200:
             raise RuntimeError("Groups failed: " + text[:120])
-        return [g.get("name", "?") for g in self._json(text)]
+        return [g.get("name", "?")
+                for g in self._as_list(text, "Groups")]
 
     def search_groups(self, query):
         status, text = self._request(
             "GET", "/groups?query=%s&n=20" % urllib.parse.quote(query))
         if status != 200:
             raise RuntimeError("Group search failed: " + text[:120])
-        return [g.get("name", "?") for g in self._json(text)]
+        return [g.get("name", "?")
+                for g in self._as_list(text, "Group search")]
 
     def join_group(self, gid):
         status, text = self._request("POST", "/groups/%s/join" % gid)
@@ -500,13 +528,13 @@ class VRChatAPI:
             if status != 200:
                 raise RuntimeError("Gallery failed: " + text[:120])
             return [(g.get("id"), g.get("name", "photo")) for g in
-                    self._json(text)]
+                    self._as_list(text, "Gallery")]
         status, text = self._request(
             "GET", "/files?tag=%s&n=100" % kind)
         if status != 200:
             raise RuntimeError("List failed: " + text[:120])
         return [(f.get("id"), f.get("name", kind)) for f in
-                self._json(text)]
+                self._as_list(text, "File list")]
 
     def delete_file(self, file_id):
         status, text = self._request("DELETE", "/file/%s" % file_id)
@@ -520,7 +548,7 @@ class VRChatAPI:
         if status != 200:
             raise RuntimeError("Notifications failed: " + text[:120])
         out = []
-        for n in self._json(text):
+        for n in self._as_list(text, "Notifications"):
             out.append({"id": n.get("id"),
                         "type": n.get("type", "?"),
                         "sender": (n.get("senderUserId") or "?"),
@@ -568,7 +596,7 @@ class VRChatAPI:
     def list_favorites(self, tag, n=50):
         st, text = self._request("GET", "/favorites?tag=%s&n=%d"
                                  % (tag, n))
-        return self._json(text) or []
+        return self._as_list(text, "Favorites")
 
     def remove_favorite(self, fav_id):
         self._request("DELETE", "/favorites/%s" % fav_id)
@@ -1091,6 +1119,19 @@ def get_window_titles(limit=30):
     except Exception:
         pass
     return titles[:limit]
+
+
+def favorite_rows(favs):
+    """Normalise whatever /favorites returned into (id, object, type)."""
+    rows = []
+    for fv in favs or []:
+        if isinstance(fv, str):
+            rows.append((fv, fv, ""))
+        elif isinstance(fv, dict):
+            fid = str(fv.get("id") or fv.get("favoriteId") or "")
+            rows.append((fid, str(fv.get("favoriteId") or ""),
+                         str(fv.get("type") or "")))
+    return rows
 
 
 def spotify_title(titles):
@@ -5890,14 +5931,16 @@ class VRCHubApp(tk.Tk):
             try:
                 favs = self.api.list_favorites(t + "s")
 
+                rows = favorite_rows(favs)
+
                 def fill():
                     self.fav_tree.delete(*self.fav_tree.get_children())
-                    for fv in favs:
-                        self.fav_tree.insert(
-                            "", "end", iid=fv["id"],
-                            values=(fv["id"], fv.get("favoriteId", ""),
-                                    fv.get("type", "")))
-                    self.status("%d favorite(s)." % len(favs))
+                    for fid, oid, kind in rows:
+                        if not fid:
+                            continue
+                        self.fav_tree.insert("", "end", iid=fid,
+                                             values=(fid, oid, kind))
+                    self.status("%d favorite(s)." % len(rows))
                 self.after(0, fill)
             except Exception as e:
                 self.after(0, lambda ex=e: self.status(str(ex)[:70]))

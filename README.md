@@ -183,6 +183,38 @@ Works on Linux/macOS too (window-title media detection and autodetect are Window
   - App detection: Scan shows which of the tools are running right now.
 - **Launcher**: hit "Autodetect" or paste paths; they're saved to `vrchub_config.json`.
 
+## Changelog
+
+### v6.8.1 (Nov 2, 2026)
+- **Fixed a crash on List favorites.** A failed API call comes back as an
+  error object, and the tab iterated it as if it were the favorite list
+  (`TypeError: string indices must be integers`). API list calls now raise a
+  readable message ("Favorites: Not logged in") and the UI shows it.
+- Favorite rows are normalised, so dict rows, bare ids and junk all render
+  instead of throwing.
+- Verified by clicking the real widgets in a live window against a mock
+  VRChat OSC endpoint: Send, Stop move, Scan, favorites and the piano keys
+  all produce correct packets with zero exceptions.
+
+### v6.8.0 (Nov 2, 2026)
+- **Sidebar opened the wrong tab** for six of fourteen entries (Connections
+  opened Plugins, Help opened Web API, Launcher opened VRCNext+). Entries now
+  resolve by tab label, so they cannot drift out of sync again.
+- **Theme matched to VRCNext's own screenshot**: near-black `#0a0a0b` body,
+  `#121316` cards, deep-blue `#4068b0` accent.
+- **Auto-login crash fixed** — the failure path raised `NameError` because
+  `except ... as ex` is deleted before the deferred callback runs.
+- **Thread safety**: worker threads called `self.after()` directly and could
+  raise "main thread is not in main loop". They now post through a queue the
+  main loop drains.
+- **No more clipped tabs.** Every tab scrolls, long labels wrap, wide control
+  strips reflow into rows, over-wide grid columns stack, tables fit the
+  window. The widest tab went from 2213px to 1046px.
+- **MIDI piano**: two octave rows instead of one 24-key strip, and the keys
+  keep their white/black colours instead of being flattened by the theme pass.
+- **Spotify detection** now matches real "Artist - Song" window titles and
+  ignores the idle "Spotify Premium" window.
+
 ## Notes
 
 - VRChat API calls are rate-limited by VRChat — hit refresh, don't spam.
@@ -191,6 +223,8 @@ Works on Linux/macOS too (window-title media detection and autodetect are Window
 - `vrchub_config.json` holds your settings/session — delete it to reset everything.
 
 ## Credits
+
+VRCHub is largely written by Ben's AI agent (a Superagent running on Base44) working from his direction, his testing, and his bug reports. Feature decisions and the final "does this actually work in VRChat" call are his.
 
 Standing on the shoulders of [VRCX](https://github.com/vrcx/VRCX), [VRCOSC](https://github.com/vrcx/VRCOSC), and [MagicChatbox](https://github.com/you-need-to/MagicChatbox) — install them too, they're free. The AI ghost runs on a tiny endpoint built with Base44.
 
