@@ -3,6 +3,13 @@ on:
   workflow_dispatch:
   push:
     tags: ["v*"]
+
+# The tag build also publishes the release asset. Without this the default
+# read-only GITHUB_TOKEN makes softprops/action-gh-release fail with
+# "Resource not accessible by integration" (v6.7.0 build).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest

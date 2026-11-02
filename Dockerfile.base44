@@ -1,0 +1,30 @@
+# Base44 sandbox image for VRCHub.
+#
+# OS packages only — the application source is bind-mounted at runtime by
+# docker-compose.base44.yml and never copied in, so edits show up without a
+# rebuild. VRCHub itself needs nothing beyond the Python standard library; the
+# extra packages here only exist to put its Tkinter window on screen:
+#   xvfb/x11-utils      -> virtual X display
+#   x11vnc              -> VNC server exporting that display
+#   novnc/websockify    -> browser client serving the display on port 3000
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 \
+      python3-tk \
+      xvfb \
+      x11-utils \
+      x11vnc \
+      novnc \
+      websockify \
+      curl \
+      fonts-dejavu-core \
+      fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+CMD ["sh", "-ec", "sh /app/.base44/start.sh"]
