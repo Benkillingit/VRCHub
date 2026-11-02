@@ -185,6 +185,20 @@ Works on Linux/macOS too (window-title media detection and autodetect are Window
 
 ## Changelog
 
+### v6.8.2 (Nov 2, 2026)
+- **VRCNext+ profile Apply button was dead.** `_vrcn_go()` forwarded only
+  positional arguments, so `update_profile(status=..., bio=..., pronouns=...)`
+  died with "unexpected keyword argument 'status'". Keyword arguments now
+  pass through, and a test asserts the call reaches the API with all five
+  profile fields.
+- **Cross-thread Tk reads removed.** Worker loops (net speed, crash guard,
+  weather, diagnostics, stats, light sync) read Tk variables directly, which
+  can raise "main thread is not in main loop". They now read a mirror kept in
+  sync by the main loop, and setters update the mirror immediately so a
+  worker started right after a toggle sees the new value.
+- Button sweep across all 14 tabs: 152 invocations, 0 exceptions. Long
+  running loops now start and stop without touching Tcl off-thread.
+
 ### v6.8.1 (Nov 2, 2026)
 - **Fixed a crash on List favorites.** A failed API call comes back as an
   error object, and the tab iterated it as if it were the favorite list

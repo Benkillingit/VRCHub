@@ -55,7 +55,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.8.1"
+APP_VERSION = "6.8.2"
 
 # VRCNext-style dark palette
 VRN_BG = "#0a0a0b"      # window background
@@ -1317,6 +1317,8 @@ class VRCHubApp(tk.Tk):
         # the main loop drains it. Fixes "RuntimeError: main thread is
         # not in main loop" on every background update.
         self._ui_queue = queue.Queue()
+        self._flag_cache = {}
+        self._num_cache = {}
         self.cfg = cfg
         self.osc = OSCEngine(cfg["osc_host"], int(cfg["osc_port"]))
         _base_send = self.osc.send
@@ -1396,6 +1398,73 @@ class VRCHubApp(tk.Tk):
             pass
         try:
             super().after(60, self._drain_ui)
+        except tk.TclError:
+            pass
+
+    # ---- thread-safe flag reads
+
+    FLAG_VARS = ("friends_offline", "diag_auto", "net_on", "crash_on",
+                 "wx_on", "stats_on")
+    NUM_VARS = ("ls_bri",)
+
+    def _num(self, name, default=100.0):
+        """Thread-safe read of a numeric Tk variable."""
+        if threading.current_thread() is threading.main_thread():
+            try:
+                val = float(getattr(self, name).get())
+                self._num_cache[name] = val
+                return val
+            except Exception:
+                return float(self._num_cache.get(name, default))
+        return float(self._num_cache.get(name, default))
+
+    def _flag(self, name):
+        """Read a Tk BooleanVar safely from any thread.
+
+        Tk variables may only be touched on the main thread; worker loops
+        calling var.get() raised "RuntimeError: main thread is not in main
+        loop" (seen in auto setup, net speed, crash guard and weather).
+        """
+        if threading.current_thread() is threading.main_thread():
+            try:
+                val = bool(getattr(self, name).get())
+                self._flag_cache[name] = val
+                return val
+            except Exception:
+                return self._flag_cache.get(name, False)
+        return self._flag_cache.get(name, False)
+
+    def _set_flag(self, name, value):
+        """Set a Tk BooleanVar and its cross-thread mirror together."""
+        self._flag_cache[name] = bool(value)
+        try:
+            getattr(self, name).set(bool(value))
+        except Exception:
+            pass
+
+    def _sync_flags(self):
+        """Refresh the mirror on the main thread (call before spawning)."""
+        for name in self.FLAG_VARS:
+            var = getattr(self, name, None)
+            if var is None:
+                continue
+            try:
+                self._flag_cache[name] = bool(var.get())
+            except tk.TclError:
+                pass
+        for name in self.NUM_VARS:
+            var = getattr(self, name, None)
+            if var is None:
+                continue
+            try:
+                self._num_cache[name] = float(var.get())
+            except (tk.TclError, ValueError):
+                pass
+
+    def _refresh_flags(self):
+        self._sync_flags()
+        try:
+            super().after(250, self._refresh_flags)
         except tk.TclError:
             pass
 
@@ -2436,13 +2505,17 @@ class VRCHubApp(tk.Tk):
 
     def _auto_setup(self, verbose=False):
         """Auto-detect VRChat files and wire up connections."""
+        current = {label: var.get().strip()
+                   for label, var in getattr(self, "tool_paths", {}).items()}
+        self._sync_flags()
+
         def work():
             found = vrchat_files_scan()
             # tool paths (launcher) - fill any blanks
             tools = autodetect(DEFAULT_TOOLS)
             tools_changed = False
-            for label, var in getattr(self, "tool_paths", {}).items():
-                if not var.get().strip() and tools.get(label):
+            for label, existing in current.items():
+                if not existing and tools.get(label):
                     self.after(0, lambda l=label, p=tools[label]:
                                self.tool_paths[l].set(p))
                     tools_changed = True
@@ -2682,10 +2755,12 @@ class VRCHubApp(tk.Tk):
         self.status("%sing %s..." % (kind, name))
 
     def _load_friends(self):
+        self._sync_flags()
+
         def work():
             try:
                 friends = self.api.friends_online(
-                    include_offline=self.friends_offline.get())
+                    include_offline=self._flag("friends_offline"))
 
                 def fill():
                     faves = self.cfg.get("fav_friends", [])
@@ -3841,7 +3916,7 @@ class VRCHubApp(tk.Tk):
                         continue
                     last = (r, g, b)
                     mx, mn = max(r, g, b), min(r, g, b)
-                    v = (mx * self.ls_bri.get()) // 100
+                    v = int(mx * self._num("ls_bri") / 100)
                     if mx == 0:
                         bulb.set_state(False)
                     else:
@@ -5356,7 +5431,7 @@ class VRCHubApp(tk.Tk):
         if not tok:
             return "no token set"
         self.cfg["b44_token"] = tok
-        self.cfg["diag_auto_send"] = bool(self.diag_auto.get())
+        self.cfg["diag_auto_send"] = bool(self._flag("diag_auto"))
         save_config(self.cfg)
         agent_id = "6aa82f8596c86160d511f44c"
         headers = {"Authorization": "Bearer " + tok,
@@ -5498,7 +5573,7 @@ class VRCHubApp(tk.Tk):
                 line("[!!] no network - phone keyboard unusable")
             n = sum(1 for l in lines if l.startswith("[!!]"))
             line("== done: %d issue(s) found ==" % n)
-            if self.diag_auto.get() and self.b44_tok.get().strip():
+            if self._flag("diag_auto") and self.b44_tok.get().strip():
                 res = self._diag_send(lines)
                 line("report → %s" % res)
             else:
@@ -5638,16 +5713,16 @@ class VRCHubApp(tk.Tk):
                       vel if on else 0)
 
     def _net_toggle(self):
-        if self.net_on.get():
-            self.net_on.set(False)
+        if self._flag("net_on"):
+            self._set_flag("net_on", False)
             self.net_btn.config(text="Start")
             self.status("Net speed off.")
             return
-        self.net_on.set(True)
+        self._set_flag("net_on", True)
         self.net_btn.config(text="Stop")
 
         def work():
-            while self.net_on.get():
+            while self._flag("net_on"):
                 try:
                     t0 = time.time()
                     with urllib.request.urlopen(
@@ -5664,28 +5739,28 @@ class VRCHubApp(tk.Tk):
                     self.after(0, lambda ex=e: self.status(
                         "Net test: %s" % ex.__class__.__name__))
                 for _ in range(900):
-                    if not self.net_on.get():
+                    if not self._flag("net_on"):
                         return
                     time.sleep(1)
         threading.Thread(target=work, daemon=True).start()
         self.status("Net speed test every 15 min.")
 
     def _crash_toggle(self):
-        if self.crash_on.get():
-            self.crash_on.set(False)
+        if self._flag("crash_on"):
+            self._set_flag("crash_on", False)
             self.crash_btn.config(text="Start")
             self.status("Crash guard off.")
             return
         if sys.platform != "win32":
             self.status("Crash guard is Windows-only.")
             return
-        self.crash_on.set(True)
+        self._set_flag("crash_on", True)
         self.crash_btn.config(text="Stop")
 
         def work():
             was = False
             last_world = ""
-            while self.crash_on.get():
+            while self._flag("crash_on"):
                 try:
                     out = subprocess.check_output(
                         ["tasklist", "/FI", "IMAGENAME eq VRChat.exe"],
@@ -5713,7 +5788,7 @@ class VRCHubApp(tk.Tk):
                     continue
                 was = running
                 for _ in range(20):
-                    if not self.crash_on.get():
+                    if not self._flag("crash_on"):
                         return
                     time.sleep(1)
         threading.Thread(target=work, daemon=True).start()
@@ -5975,8 +6050,8 @@ class VRCHubApp(tk.Tk):
               82: "heavy showers", 95: "thunderstorm"}
 
     def _wx_toggle(self):
-        if self.wx_on.get():
-            self.wx_on.set(False)
+        if self._flag("wx_on"):
+            self._set_flag("wx_on", False)
             self.wx_btn.config(text="Start")
             self.status("Weather off.")
             return
@@ -5986,11 +6061,11 @@ class VRCHubApp(tk.Tk):
             return
         self.cfg["wx_city"] = city
         save_config(self.cfg)
-        self.wx_on.set(True)
+        self._set_flag("wx_on", True)
         self.wx_btn.config(text="Stop")
 
         def work():
-            while self.wx_on.get():
+            while self._flag("wx_on"):
                 try:
                     g = json.load(urllib.request.urlopen(
                         "https://geocoding-api.open-meteo.com/v1/search"
@@ -6011,7 +6086,7 @@ class VRCHubApp(tk.Tk):
                     self.after(0, lambda ex=e: self.status(
                         "Weather: %s" % ex.__class__.__name__))
                 for _ in range(600):
-                    if not self.wx_on.get():
+                    if not self._flag("wx_on"):
                         return
                     time.sleep(1)
         threading.Thread(target=work, daemon=True).start()
@@ -6033,10 +6108,13 @@ class VRCHubApp(tk.Tk):
             pass
         return n
 
-    def _vrcn_go(self, fn, *a):
+    def _vrcn_go(self, fn, *a, **kw):
+        # **kw matters: _vrcn_profile passes status=, bio=, pronouns= and
+        # languages= to update_profile, which took no positional args, so
+        # the Apply button died with "unexpected keyword argument 'status'".
         def work():
             try:
-                out = fn(*a)
+                out = fn(*a, **kw)
                 self.after(0, lambda: self._vrcn_log(str(out)[:400]))
             except Exception as e:
                 self.after(0, lambda ex=e: self._vrcn_log("ERR: %s" % str(ex)[:150]))
@@ -6067,14 +6145,13 @@ class VRCHubApp(tk.Tk):
     def _vrcn_stats(self):
         if not hasattr(self, "_stats_on") :
             self._stats_on = False
-        if not self.stats_on.get():
+        if not self._flag("stats_on"):
             return
 
         def work():
             while True:
                 time.sleep(300)
-                if not getattr(self, "stats_on", None) or \
-                        not self.stats_on.get():
+                if not self._flag("stats_on"):
                     continue
                 try:
                     me = self.api.me()
