@@ -34,6 +34,7 @@ import hashlib
 import hmac
 import json
 import os
+import queue
 import random
 import re
 import socket
@@ -54,35 +55,39 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.7.0"
+APP_VERSION = "6.8.0"
 
 # VRCNext-style dark palette
-VRN_BG = "#15171c"      # window background
-VRN_PANEL = "#1c2027"   # cards / buttons
-VRN_SIDE = "#101216"   # sidebar
-VRN_ACCENT = "#4f9cf9"  # accent blue
-VRN_FG = "#e8ebf2"      # main text
-VRN_MUTED = "#8b93a4"   # secondary text
-VRN_FIELD = "#11131a"   # input fields
-VRN_HOVER = "#242b38"   # hover
-VRN_SEL = "#22314f"     # selected nav
-NAV_ICONS = {0: "💬", 1: "🤖", 4: "🎵", 2: "🌐", 11: "🧭", 5: "🌍",
-             3: "🎭", 9: "👁", 8: "🔗", 6: "🧰", 13: "🚀", 7: "🧩",
-             10: "❓", 12: "⭐"}
-NAV_SUBS = {0: "Send text to the VRChat chatbox",
-            1: "Talk to an AI through OSC",
-            4: "Media keys and chat presence",
-            2: "Friends, avatars, instances",
-            11: "Search and manage anything on VRChat",
-            5: "World search and favorites",
-            3: "Live avatar parameters over OSC",
-            9: "Face tracking to avatar params",
-            8: "Friend activity and watchlist",
-            6: "Tweaks and quick tools",
-            13: "Start VRChat your way",
-            7: "Load extra features",
-            10: "Docs and getting started",
-            12: "Borrowed from VRCNext"}
+VRN_BG = "#0a0a0b"      # window background
+VRN_PANEL = "#121316"   # cards / buttons
+VRN_SIDE = "#050506"   # sidebar
+VRN_ACCENT = "#4068b0"  # accent blue
+VRN_FG = "#e9ecf2"      # main text
+VRN_MUTED = "#7f8794"   # secondary text
+VRN_FIELD = "#0d0e11"   # input fields
+VRN_HOVER = "#1b1d22"   # hover
+VRN_SEL = "#16213c"     # selected nav
+NAV_ICONS = {"Chatbox": "\U0001F4AC", "AI Chat": "\U0001F916",
+             "Media & Chat": "\U0001F3B5", "VRChat API": "\U0001F310",
+             "Web API": "\U0001F9ED", "Worlds": "\U0001F30D",
+             "Avatar Params": "\U0001F3AD", "Face Track": "\U0001F441",
+             "Connections": "\U0001F517", "Extras": "\U0001F9F0",
+             "Launcher": "\U0001F680", "Plugins": "\U0001F9E9",
+             "Help": "\u2753", "VRCNext+": "\u2B50"}
+NAV_SUBS = {"Chatbox": "Send text to the VRChat chatbox",
+            "AI Chat": "Talk to an AI through OSC",
+            "Media & Chat": "Media keys and chat presence",
+            "VRChat API": "Friends, avatars, instances",
+            "Web API": "Search and manage anything on VRChat",
+            "Worlds": "World search and favorites",
+            "Avatar Params": "Live avatar parameters over OSC",
+            "Face Track": "Face tracking to avatar params",
+            "Connections": "Friend activity and watchlist",
+            "Extras": "Tweaks and quick tools",
+            "Launcher": "Start VRChat your way",
+            "Plugins": "Load extra features",
+            "Help": "Docs and getting started",
+            "VRCNext+": "Borrowed from VRCNext"}
 def _data_dir():
     """Stable folder that survives restarts (also fixes PyInstaller
     onefile writing config into the deleted _MEI temp dir)."""
@@ -1089,11 +1094,25 @@ def get_window_titles(limit=30):
 
 
 def spotify_title(titles):
-    """Best-effort current-track extraction from window titles."""
+    """Best-effort current-track extraction from window titles.
+
+    Real Spotify windows are titled "Artist - Song", which does not
+    contain the word Spotify, so the old substring check never matched
+    and the media feature showed nothing while music was playing.
+    """
+    idle = {"spotify", "spotify free", "spotify premium",
+            "spotify - web player", "spotify - now playing"}
     for t in titles:
-        if "Spotify" in t and t not in ("Spotify", "Spotify Free",
-                                       "Spotify Premium"):
-            return t
+        t = str(t).strip()
+        low = t.lower()
+        if not t or low in idle or len(t) < 5:
+            continue
+        if " - " in t:
+            return t                     # "Artist - Song"
+        if low.startswith("spotify"):
+            rest = t.split(":", 1)
+            if len(rest) == 2 and rest[1].strip():
+                return rest[1].strip()   # "Spotify: Song"
     return None
 
 
@@ -1253,6 +1272,10 @@ GESTURES = ["Neutral", "Fist", "Open", "Point", "Peace", "RockNRoll",
 class VRCHubApp(tk.Tk):
     def __init__(self, cfg):
         super().__init__()
+        # Worker threads must never touch Tk directly; they post here and
+        # the main loop drains it. Fixes "RuntimeError: main thread is
+        # not in main loop" on every background update.
+        self._ui_queue = queue.Queue()
         self.cfg = cfg
         self.osc = OSCEngine(cfg["osc_host"], int(cfg["osc_port"]))
         _base_send = self.osc.send
@@ -1297,8 +1320,8 @@ class VRCHubApp(tk.Tk):
         self._loop_running = False
         self.title("%s %s — your VRChat toolkit in one place"
                    % (APP_NAME, APP_VERSION))
-        self.geometry("980x640")
-        self.minsize(860, 560)
+        self.geometry("1360x820")
+        self.minsize(1080, 680)
         self.plugins = load_plugins()
         for p in self.plugins:
             try:
@@ -1307,7 +1330,33 @@ class VRCHubApp(tk.Tk):
                 pass
         self._apply_vrcnext_theme()
         self._build_ui()
+        super().after(60, self._drain_ui)
         self._try_session()
+
+    def after(self, ms, func=None, *args):
+        """Thread-aware after(): from a worker thread the callback is
+        queued and run by the main loop instead of corrupting Tcl."""
+        if func is None:
+            return super().after(ms)
+        if threading.current_thread() is threading.main_thread():
+            return super().after(ms, func, *args)
+        self._ui_queue.put((ms, func, args))
+        return None
+
+    def _drain_ui(self):
+        try:
+            while True:
+                ms, func, args = self._ui_queue.get_nowait()
+                try:
+                    super().after(ms, func, *args)
+                except tk.TclError:
+                    return
+        except queue.Empty:
+            pass
+        try:
+            super().after(60, self._drain_ui)
+        except tk.TclError:
+            pass
 
     # ---- shared
 
@@ -1356,7 +1405,7 @@ class VRCHubApp(tk.Tk):
         st.configure("TFrame", background=VRN_BG)
         st.configure("TLabel", background=VRN_BG, foreground=VRN_FG)
         st.configure("TLabelframe", background=VRN_BG,
-                      bordercolor="#2a2f3a", relief="flat")
+                      bordercolor="#1e2027", relief="flat")
         st.configure("TLabelframe.Label", background=VRN_BG,
                       foreground=VRN_MUTED)
         st.configure("TButton", background=VRN_PANEL, foreground=VRN_FG,
@@ -1367,15 +1416,15 @@ class VRCHubApp(tk.Tk):
                foreground=[("disabled", VRN_MUTED)])
         st.configure("TEntry", fieldbackground=VRN_FIELD,
                      foreground=VRN_FG, insertcolor=VRN_FG,
-                     bordercolor="#2a2f3a", lightcolor="#2a2f3a",
-                     darkcolor="#2a2f3a", padding=3)
+                     bordercolor="#1e2027", lightcolor="#1e2027",
+                     darkcolor="#1e2027", padding=3)
         st.map("TEntry", bordercolor=[("focus", VRN_ACCENT)],
                lightcolor=[("focus", VRN_ACCENT)],
                darkcolor=[("focus", VRN_ACCENT)])
         st.configure("TCombobox", fieldbackground=VRN_FIELD,
                      background=VRN_PANEL, foreground=VRN_FG,
-                     arrowcolor=VRN_MUTED, bordercolor="#2a2f3a",
-                     lightcolor="#2a2f3a", darkcolor="#2a2f3a")
+                     arrowcolor=VRN_MUTED, bordercolor="#1e2027",
+                     lightcolor="#1e2027", darkcolor="#1e2027")
         st.map("TCombobox",
                fieldbackground=[("readonly", VRN_FIELD)],
                bordercolor=[("focus", VRN_ACCENT)],
@@ -1383,8 +1432,8 @@ class VRCHubApp(tk.Tk):
                darkcolor=[("focus", VRN_ACCENT)])
         st.configure("TSpinbox", fieldbackground=VRN_FIELD,
                      background=VRN_PANEL, foreground=VRN_FG,
-                     arrowcolor=VRN_MUTED, bordercolor="#2a2f3a",
-                     lightcolor="#2a2f3a", darkcolor="#2a2f3a")
+                     arrowcolor=VRN_MUTED, bordercolor="#1e2027",
+                     lightcolor="#1e2027", darkcolor="#1e2027")
         st.configure("TCheckbutton", background=VRN_BG,
                       foreground=VRN_FG, focuscolor=VRN_ACCENT)
         st.map("TCheckbutton", background=[("active", VRN_BG)],
@@ -1393,7 +1442,7 @@ class VRCHubApp(tk.Tk):
         st.map("TRadiobutton", background=[("active", VRN_BG)],
                indicatorcolor=[("selected", VRN_ACCENT)])
         st.configure("TScale", background=VRN_BG, troughcolor=VRN_FIELD,
-                      bordercolor="#2a2f3a", lightcolor=VRN_ACCENT,
+                      bordercolor="#1e2027", lightcolor=VRN_ACCENT,
                       darkcolor=VRN_ACCENT)
         st.configure("TProgressbar", troughcolor=VRN_FIELD,
                       background=VRN_ACCENT, bordercolor=VRN_BG,
@@ -1411,7 +1460,7 @@ class VRCHubApp(tk.Tk):
             pass
         st.configure("Treeview", background=VRN_PANEL,
                      fieldbackground=VRN_PANEL, foreground=VRN_FG,
-                     bordercolor="#2a2f3a", rowheight=24)
+                     bordercolor="#1e2027", rowheight=24)
         st.configure("Treeview.Heading", background=VRN_HOVER,
                      foreground=VRN_MUTED, relief="flat", borderwidth=0)
         st.map("Treeview", background=[("selected", VRN_SEL)],
@@ -1421,12 +1470,259 @@ class VRCHubApp(tk.Tk):
                      arrowcolor=VRN_MUTED, relief="flat")
         st.map("TScrollbar", background=[("active", VRN_HOVER)])
 
+    def _tab_index(self, label):
+        """Real notebook index for a tab label, so nav entries can never
+        drift out of sync with the order tabs are added."""
+        try:
+            for i in self.nb.tabs():
+                if self.nb.tab(i, "text").strip() == label:
+                    return self.nb.index(i)
+        except (tk.TclError, AttributeError):
+            pass
+        return None
+
+    def _tab_page(self, nb, title, padding=10):
+        """Scrollable tab page. Content that is taller or wider than the
+        window scrolls instead of being clipped off the edge."""
+        outer = ttk.Frame(nb)
+        nb.add(outer, text="  %s  " % title)
+        canvas = tk.Canvas(outer, bg=VRN_BG, highlightthickness=0, bd=0)
+        vbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        hbar = ttk.Scrollbar(outer, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+        vbar.pack(side="right", fill="y")
+        hbar.pack(side="bottom", fill="x")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = ttk.Frame(canvas, padding=padding)
+        wid = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _fit(_event=None):
+            try:
+                view = canvas.winfo_width()
+                if view > 1:
+                    # always match the viewport: using max(req, view) let a
+                    # page ratchet wider on every redraw
+                    canvas.itemconfig(wid, width=view)
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except tk.TclError:
+                pass
+
+        def _wheel(event):
+            step = -1 if getattr(event, "delta", 0) > 0 else 1
+            if getattr(event, "num", None) == 4:
+                step = -1
+            elif getattr(event, "num", None) == 5:
+                step = 1
+            try:
+                canvas.yview_scroll(step, "units")
+            except tk.TclError:
+                pass
+
+        inner.bind("<Configure>", _fit)
+        canvas.bind("<Configure>", _fit)
+        canvas.bind("<Enter>",
+                    lambda e: canvas.bind_all("<MouseWheel>", _wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        canvas.bind("<Button-4>", _wheel)
+        canvas.bind("<Button-5>", _wheel)
+        return inner
+
+    def _on_resize(self, event):
+        """Re-wrap content when the window size actually changes."""
+        if getattr(self, "_wrap_w", None) == event.width:
+            return
+        self._wrap_w = event.width
+        self.after(150, self._normalize_widths)
+
+    def _all_widgets(self, w=None, acc=None):
+        if acc is None:
+            acc = []
+        if w is None:
+            w = self
+        for c in w.winfo_children():
+            acc.append(c)
+            self._all_widgets(c, acc)
+        return acc
+
+    def _normalize_widths(self):
+        """Fit every tab inside the viewport: wrap long labels, narrow wide
+        Text boxes, and cap Treeview columns. Without this each tab asked
+        for 1000-2200px and got clipped at the window edge."""
+        try:
+            view = self.nb.winfo_width()
+        except tk.TclError:
+            view = 0
+        if view < 400:
+            view = 940
+        wrap = max(320, view - 96)
+        for c in self._all_widgets():
+            try:
+                cls = c.winfo_class()
+                if cls in ("TLabel", "Label"):
+                    txt = str(c.cget("text"))
+                    if len(txt) > 40 and not int(c.cget("wraplength") or 0):
+                        # Labels sitting in a horizontal row of controls
+                        # must shrink, not just wrap at window width --
+                        # they are what pushed rows 1400-2200px wide.
+                        inline = False
+                        try:
+                            info = c.pack_info()
+                            inline = info.get("side") in ("left", "right")
+                        except (tk.TclError, KeyError):
+                            try:
+                                info = c.grid_info()
+                                inline = bool(info)
+                            except (tk.TclError, KeyError):
+                                inline = False
+                        c.configure(wraplength=260 if inline else wrap)
+                elif cls == "Text":
+                    if int(c.cget("width")) > 58:
+                        c.configure(width=58)
+                elif cls == "Treeview":
+                    cols = list(c.cget("columns") or [])
+                    if cols:
+                        cap = max(110, int(wrap / max(1, len(cols))) + 40)
+                        for name in cols:
+                            try:
+                                if int(c.column(name, "width")) > cap:
+                                    c.column(name, width=cap)
+                            except tk.TclError:
+                                pass
+            except (tk.TclError, ValueError, TypeError):
+                pass
+        self._flow_rows(wrap)
+        self._stack_grid(wrap)
+        self._fit_trees(wrap)
+
+    def _stack_grid(self, wrap):
+        """A container using 2+ grid columns wider than the viewport gets
+        its right-hand columns stacked underneath the left one."""
+        for c in self._all_widgets():
+            if getattr(c, "_vrn_stacked", False):
+                continue
+            try:
+                cells = [k for k in c.winfo_children()
+                         if k.winfo_manager() == "grid"]
+            except tk.TclError:
+                continue
+            if len(cells) < 2:
+                continue
+            try:
+                if c.winfo_reqwidth() <= wrap:
+                    continue
+            except tk.TclError:
+                continue
+            info = []
+            for k in cells:
+                gi = k.grid_info()
+                info.append((k, int(gi.get("row", 0)),
+                             int(gi.get("column", 0))))
+            if max(i[2] for i in info) < 1:
+                continue
+            maxrow = max(i[1] for i in info)
+            moved = 0
+            for k, _r, col in info:
+                if col < 1:
+                    continue
+                maxrow += 1
+                try:
+                    k.grid_configure(row=maxrow, column=0,
+                                     columnspan=1, sticky="w")
+                    moved += 1
+                except tk.TclError:
+                    pass
+            if moved:
+                c._vrn_stacked = True
+
+    def _fit_trees(self, wrap):
+        """Shrink over-wide Treeview columns so the table fits the tab."""
+        budget = max(400, wrap - 60)
+        for c in self._all_widgets():
+            if c.winfo_class() != "Treeview":
+                continue
+            try:
+                cols = list(c.cget("columns") or [])
+                if not cols:
+                    continue
+                widths = [int(c.column(n, "width")) for n in cols]
+            except tk.TclError:
+                continue
+            total = sum(widths)
+            if total <= budget:
+                continue
+            scale = max(0.35, budget / float(total))
+            for n, w in zip(cols, widths):
+                try:
+                    c.column(n, width=max(60, int(w * scale)))
+                except tk.TclError:
+                    pass
+
+    _FLOWABLE = ("TButton", "Button", "TEntry", "Entry", "TCombobox",
+                 "Combobox", "TSpinbox", "Spinbox", "Scale", "TScale",
+                 "TCheckbutton", "Checkbutton", "TRadiobutton",
+                 "Radiobutton", "TLabel", "Label")
+
+    def _flow_rows(self, wrap):
+        """Rows built as one long pack(side="left") strip are what forced
+        tabs 1000-2200px wide. Re-flow them into grid rows that fit."""
+        for c in self._all_widgets():
+            if getattr(c, "_vrn_flowed", False):
+                continue
+            if isinstance(c, (tk.Canvas, tk.Text, ttk.Treeview)):
+                continue
+            try:
+                kids = [k for k in c.winfo_children()
+                        if k.winfo_manager() == "pack"]
+            except tk.TclError:
+                continue
+            if len(kids) < 4:
+                continue
+            # Nested frames / labelframes (e.g. a bio box under a row of
+            # fields) are fine: they get their own full-width row below.
+
+            try:
+                if c.winfo_reqwidth() <= wrap:
+                    continue
+            except tk.TclError:
+                continue
+            row = col = used = 0
+            for k in kids:
+                try:
+                    if k.winfo_class() in ("Text", "Treeview") or \
+                            not (k.winfo_class() in self._FLOWABLE
+                                 or k.winfo_class() == "TFrame"):
+                        # big or nested widgets get a full row to themselves
+                        if used:
+                            row += 1
+                            col = 0
+                            used = 0
+                        k.pack_forget()
+                        k.grid(row=row, column=0, columnspan=8,
+                               sticky="ew", padx=3, pady=2)
+                        row += 1
+                        col = 0
+                        used = 0
+                        continue
+                    w = max(56, k.winfo_reqwidth())
+                    if used and used + w > wrap - 24:
+                        row += 1
+                        col = 0
+                        used = 0
+                    k.pack_forget()
+                    k.grid(row=row, column=col, sticky="w",
+                           padx=3, pady=2)
+                except tk.TclError:
+                    continue
+                used += w
+                col += 1
+            c._vrn_flowed = True
+
     def _nav_build(self, nav):
         """Build the VRCNext-style left sidebar."""
         side = self._nav_side
-        lg = tk.Canvas(side, bg=VRN_SIDE, width=212, height=54,
+        lg = tk.Canvas(side, bg=VRN_SIDE, width=212, height=50,
                        highlightthickness=0)
-        lg.pack(fill="x", pady=(14, 2))
+        lg.pack(fill="x", pady=(10, 0))
         lg.create_oval(24, 12, 52, 40, fill=VRN_ACCENT, outline="")
         lg.create_oval(31, 19, 45, 33, fill=VRN_SIDE, outline="")
         lg.create_text(62, 26, text="VRCHub", fill="#ffffff",
@@ -1434,19 +1730,22 @@ class VRCHubApp(tk.Tk):
         self._nav_names = {}
         tk.Label(side, text="v%s" % APP_VERSION, bg=VRN_SIDE,
                  fg=VRN_MUTED,
-                 font=("Segoe UI", 9)).pack(side="bottom", pady=8)
+                 font=("Segoe UI", 9)).pack(side="bottom", pady=5)
         for cat, items in nav:
             tk.Label(side, text=cat, bg=VRN_SIDE, fg=VRN_MUTED,
                      font=("Segoe UI", 8, "bold")).pack(
-                anchor="w", padx=18, pady=(10, 3))
-            for label, idx in items:
-                icon = NAV_ICONS.get(idx, "•")
+                anchor="w", padx=18, pady=(8, 2))
+            for label in items:
+                idx = self._tab_index(label)
+                if idx is None:
+                    continue
+                icon = NAV_ICONS.get(label, "•")
                 self._nav_names[idx] = label
                 b = tk.Label(side, text="  %s  %s" % (icon, label),
                              bg=VRN_SIDE, fg=VRN_FG,
                              font=("Segoe UI", 10), anchor="w",
-                             padx=10, pady=4, cursor="hand2")
-                b.pack(fill="x", padx=8, pady=1)
+                             padx=10, pady=3, cursor="hand2")
+                b.pack(fill="x", padx=8)
                 b.bind("<Button-1>",
                        lambda e, i=idx: self._nav_select(i))
                 b.bind("<Enter>", lambda e, w=b, i=idx: (
@@ -1472,7 +1771,8 @@ class VRCHubApp(tk.Tk):
         try:
             self._hdr_title.config(text=self._nav_names.get(idx, ""))
             self._hdr_sub.config(
-                text=NAV_SUBS.get(idx, "one app, instead of ten"))
+                text=NAV_SUBS.get(self._nav_names.get(idx, ""),
+                                  "one app, instead of ten"))
         except (AttributeError, tk.TclError):
             pass
 
@@ -1481,6 +1781,9 @@ class VRCHubApp(tk.Tk):
         if w is None:
             w = self
         for c in w.winfo_children():
+            if getattr(c, "_vrn_keep", False):
+                self._dark_walk(c)
+                continue
             try:
                 if isinstance(c, tk.Text):
                     c.config(bg=VRN_FIELD, fg=VRN_FG,
@@ -1488,14 +1791,14 @@ class VRCHubApp(tk.Tk):
                              selectbackground=VRN_SEL,
                              relief="flat", borderwidth=0,
                              highlightthickness=1,
-                             highlightbackground="#2a2f3a",
+                             highlightbackground="#1e2027",
                              highlightcolor=VRN_ACCENT)
                 elif isinstance(c, (tk.Entry, tk.Listbox)):
                     c.config(bg=VRN_FIELD, fg=VRN_FG,
                              insertbackground=VRN_FG,
                              relief="flat", borderwidth=0,
                              highlightthickness=1,
-                             highlightbackground="#2a2f3a",
+                             highlightbackground="#1e2027",
                              highlightcolor=VRN_ACCENT)
                 elif isinstance(c, tk.Button):
                     c.config(bg=VRN_PANEL, fg=VRN_FG,
@@ -1562,19 +1865,18 @@ class VRCHubApp(tk.Tk):
         self._nav_side = side
         self._nav_btns = {}
         nav = [
-            ("SOCIAL", [("Chatbox", 0), ("AI Chat", 1),
-                        ("Media & Chat", 4)]),
-            ("VRCHAT", [("VRChat API", 2), ("Web API", 11),
-                        ("Worlds", 5), ("Avatar Params", 3)]),
-            ("AVATAR & DEVICE", [("Face Track", 9),
-                                 ("Connections", 8)]),
-            ("TOOLS", [("Extras", 6), ("Launcher", 13),
-                       ("Plugins", 7)]),
-            ("INFO", [("Help", 10), ("VRCNext+", 12)]),
+            ("SOCIAL", ["Chatbox", "AI Chat", "Media & Chat"]),
+            ("VRCHAT", ["VRChat API", "Web API", "Worlds",
+                        "Avatar Params"]),
+            ("AVATAR & DEVICE", ["Face Track", "Connections"]),
+            ("TOOLS", ["Extras", "Launcher", "Plugins"]),
+            ("INFO", ["Help", "VRCNext+"]),
         ]
         self.after(60, lambda: self._nav_build(nav))
         self._banner_refresh()
+        self.after(120, self._normalize_widths)
         self._dark_walk()
+        self.bind("<Configure>", self._on_resize)
         sb = ttk.Frame(self)
         sb.pack(fill="x", side="bottom")
         ttk.Label(sb, textvariable=self.status_var, anchor="w",
@@ -1586,8 +1888,7 @@ class VRCHubApp(tk.Tk):
     # ---- Chatbox tab (VRCOSC / MCB / Nexus)
 
     def _tab_chatbox(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Chatbox  ")
+        f = self._tab_page(nb, "Chatbox")
 
         ttk.Label(f, text="Send text to the VRChat chatbox. Enable OSC in "
                           "VRChat: Settings → OSC → ON (port 9000).").grid(
@@ -1737,8 +2038,7 @@ class VRCHubApp(tk.Tk):
     # ---- AI tab
 
     def _tab_ai(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  AI Chat  ")
+        f = self._tab_page(nb, "AI Chat")
         ttk.Label(f, text="Talk to the Bas44 ghost. With 'relay' on, each reply "
                           "is also sent to your VRChat chatbox.").grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -1783,8 +2083,7 @@ class VRCHubApp(tk.Tk):
     # ---- VRChat API tab (VRCX / VRCNext / Nexus)
 
     def _tab_api(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  VRChat API  ")
+        f = self._tab_page(nb, "VRChat API")
 
         login = ttk.LabelFrame(f, text="Login (saved to vrchub_config.json as a "
                                       "session cookie)", padding=6)
@@ -2139,10 +2438,14 @@ class VRCHubApp(tk.Tk):
                                 text="Auto-login: %s" % logged)
                         self.after(0, ok)
                 except Exception as ex:
+                    # Bind the text now: Python deletes 'ex' at the end of
+                    # the except block, so the deferred callback would
+                    # raise NameError instead of showing the error.
+                    _err_text = str(ex)[:70]
+
                     def fail():
                         self.vrc_me_label.config(
-                            text="Auto-login failed: %s"
-                            % str(ex)[:70])
+                            text="Auto-login failed: %s" % _err_text)
                     self.after(0, fail)
             def report():
                 parts = []
@@ -2493,8 +2796,7 @@ class VRCHubApp(tk.Tk):
     # ---- Params tab (VRCOSC)
 
     def _tab_params(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Avatar Params  ")
+        f = self._tab_page(nb, "Avatar Params")
         ttk.Label(f, text="Set avatar parameters by exact name (find names in "
                           "VRCX or your avatar descriptor).").grid(
             row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -2655,8 +2957,7 @@ class VRCHubApp(tk.Tk):
     # ---- Media & Chat tab (MagicChatbox / VRCOSC)
 
     def _tab_media(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Media & Chat  ")
+        f = self._tab_page(nb, "Media & Chat")
 
         # Media status
         med = ttk.LabelFrame(f, text="Media status (MagicChatbox/Nexus: show "
@@ -2923,8 +3224,7 @@ class VRCHubApp(tk.Tk):
 # ---- Worlds tab (VRCX world browser)
 
     def _tab_worlds(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Worlds  ")
+        f = self._tab_page(nb, "Worlds")
 
         row = ttk.Frame(f)
         row.pack(fill="x", pady=(0, 6))
@@ -3117,8 +3417,7 @@ class VRCHubApp(tk.Tk):
     # ---- Extras tab (VRCOSC/MCB extras)
 
     def _tab_extras(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Extras  ")
+        f = self._tab_page(nb, "Extras")
 
         afk = ttk.LabelFrame(f, text="AFK detection (VRCOSC-style)", padding=6)
         afk.grid(row=0, column=0, sticky="ew", pady=3)
@@ -3857,8 +4156,7 @@ class VRCHubApp(tk.Tk):
     # ---- community plugins
 
     def _tab_plugins(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Plugins  ")
+        f = self._tab_page(nb, "Plugins")
         top = ttk.Frame(f)
         top.pack(fill="x", pady=(0, 6))
         ttk.Label(top, text="Community plugins: drop a .py file into the "
@@ -4549,8 +4847,7 @@ class VRCHubApp(tk.Tk):
 # ---- Connections tab (talk to the other apps)
 
     def _tab_connect(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Connections  ")
+        f = self._tab_page(nb, "Connections")
 
         det = ttk.LabelFrame(f, text="App detection", padding=6)
         det.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -4819,8 +5116,7 @@ class VRCHubApp(tk.Tk):
     # ---- Face Track tab (optional deps: opencv + mediapipe)
 
     def _tab_face(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Face Track  ")
+        f = self._tab_page(nb, "Face Track")
         ttk.Label(f, text="EXPERIMENTAL webcam face tracking. Optional "
                           "dependencies:\n"
                           "    pip install opencv-python mediapipe\n"
@@ -4979,8 +5275,7 @@ class VRCHubApp(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
 
     def _tab_help(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Help  ")
+        f = self._tab_page(nb, "Help")
         txt = scrolledtext.ScrolledText(f, wrap="word", font=("Segoe UI", 10))
         txt.pack(fill="both", expand=True)
         txt.insert("end", HELP_TEXT)
@@ -5432,8 +5727,7 @@ class VRCHubApp(tk.Tk):
     # ---- Web API tab: full VRChat web API surface
 
     def _tab_webapi(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Web API  ")
+        f = self._tab_page(nb, "Web API")
 
         us = ttk.LabelFrame(f, text="User search (all VRChat users)",
                             padding=6)
@@ -5771,8 +6065,7 @@ class VRCHubApp(tk.Tk):
             ", ".join("%s=%d" % (k, v) for k, v in ft[:5]) or "none"))
 
     def _tab_vrcn(self, nb):
-        f = ttk.Frame(nb, padding=8)
-        nb.add(f, text="  VRCNext+  ")
+        f = self._tab_page(nb, "VRCNext+", padding=8)
 
         pf = ttk.LabelFrame(f, text="Profile (status / bio / pronouns / "
                                     "languages)", padding=6)
@@ -6033,12 +6326,18 @@ class VRCHubApp(tk.Tk):
         names = "C C# D D# E F F# G G# A A# B".split()
         for i in range(24):
             note = 60 + i
+            sharp = "#" in names[i % 12]
             b = tk.Button(kbd, text=names[i % 12] + str(4 + i // 12),
-                          padx=2, pady=2,
-                          font=("Segoe UI", 7),
-                          bg="#333" if "#" in names[i % 12] else "#eee",
-                          fg="#fff" if "#" in names[i % 12] else "#000")
-            b.grid(row=0, column=i, padx=1)
+                          padx=2, pady=3, width=3,
+                          font=("Segoe UI", 7), relief="flat", bd=0,
+                          bg="#0d0e11" if sharp else "#c8ccd6",
+                          fg="#9aa1ad" if sharp else "#0a0a0b",
+                          activebackground="#4068b0",
+                          activeforeground="#ffffff")
+            # _dark_walk would otherwise repaint every key the same
+            # colour, turning the piano into a strip of identical blocks
+            b._vrn_keep = True
+            b.grid(row=i // 12, column=i % 12, padx=1, pady=1)
             b.bind("<ButtonPress-1>",
                    lambda e, n=note: self._osc_midi(n, 1))
             b.bind("<ButtonRelease-1>",
@@ -6100,8 +6399,7 @@ class VRCHubApp(tk.Tk):
     # ---- Launcher tab (VRCNext)
 
     def _tab_tools(self, nb):
-        f = ttk.Frame(nb, padding=10)
-        nb.add(f, text="  Launcher  ")
+        f = self._tab_page(nb, "Launcher")
         ttk.Label(f, text="Launch VRChat, VRCX, VRCOSC and MagicChatbox from "
                           "one place. Paths save to vrchub_config.json.").grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
