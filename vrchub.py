@@ -55,7 +55,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 APP_NAME = "VRCHub"
-APP_VERSION = "6.8.2"
+APP_VERSION = "6.8.3"
 
 # VRCNext-style dark palette
 VRN_BG = "#0a0a0b"      # window background
@@ -2158,9 +2158,13 @@ class VRCHubApp(tk.Tk):
         self.ai_entry = ttk.Entry(f, font=("Segoe UI", 12))
         self.ai_entry.grid(row=2, column=0, sticky="ew", pady=4)
         self.ai_entry.bind("<Return>", lambda e: self._send_ai())
+        # Return alone was the only way to send; mouse users had no button.
+        ttk.Button(f, text="Send", command=self._send_ai).grid(
+            row=2, column=1, padx=(6, 0), pady=4)
         self.ai_relay = tk.BooleanVar(value=bool(self.cfg.get("ai_to_chatbox", True)))
         ttk.Checkbutton(f, text="Relay replies to chatbox",
-                        variable=self.ai_relay).grid(row=3, column=0, sticky="w")
+                        variable=self.ai_relay).grid(row=3, column=0,
+                                                     columnspan=2, sticky="w")
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
         self._ai_log_append("Ghost online. Ask me anything.\n")
@@ -4275,13 +4279,18 @@ class VRCHubApp(tk.Tk):
         f = self._tab_page(nb, "Plugins")
         top = ttk.Frame(f)
         top.pack(fill="x", pady=(0, 6))
-        ttk.Label(top, text="Community plugins: drop a .py file into the "
-                            "plugins/ folder next to vrchub.py and rescan."
+        ttk.Label(top, text="Community plugins: drop a .py file into "
+                            "the folder below, then Rescan."
                   ).pack(side="left")
         ttk.Button(top, text="Rescan", width=9,
                    command=self._plugins_rescan).pack(side="left", padx=8)
         ttk.Label(top, text="See PLUGINS.md to write your own."
                   ).pack(side="left", padx=6)
+        # show the folder actually being scanned - "next to vrchub.py" is
+        # only true in portable mode
+        ttk.Label(f, text=PLUGIN_DIR, foreground="#888",
+                  wraplength=1040, justify="left").pack(anchor="w",
+                                                        pady=(0, 6))
         self.plugin_container = ttk.Frame(f)
         self.plugin_container.pack(fill="both", expand=True)
         self._plugins_render()

@@ -185,6 +185,17 @@ Works on Linux/macOS too (window-title media detection and autodetect are Window
 
 ## Changelog
 
+### v6.8.3 (Nov 2, 2026)
+- **AI Chat had no Send button** - Return on the entry was the only way to
+  send. It has a button now.
+- **Plugins tab prints the folder it actually scans.** The old text said
+  "next to vrchub.py", which is only true in portable mode; plugins normally
+  live in `%USERPROFILE%\VRCHub\plugins`. PLUGINS.md got the real paths.
+- New `TESTING.md` plus probes for the plugin system, tab inventories,
+  handler edge cases and static call checks. Plugin loading is now verified
+  end to end: discovery, `init()`, panel rendering, a button emitting OSC,
+  and a deliberately broken plugin being reported instead of crashing.
+
 ### v6.8.2 (Nov 2, 2026)
 - **VRCNext+ profile Apply button was dead.** `_vrcn_go()` forwarded only
   positional arguments, so `update_profile(status=..., bio=..., pronouns=...)`

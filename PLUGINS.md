@@ -1,6 +1,15 @@
 # Writing VRCHub plugins
 
-Anyone can add features to VRCHub without touching the core file. A plugin is one `.py` file dropped into the `plugins/` folder next to `vrchub.py`. Hit **Rescan** in the Plugins tab (or restart) and it appears as its own panel.
+Anyone can add features to VRCHub without touching the core file. A plugin is one `.py` file dropped into the `plugins` folder. Hit **Rescan** in the Plugins tab (or restart) and it appears as its own panel.
+
+Where that folder lives:
+
+| How you run VRCHub | `plugins` folder |
+| --- | --- |
+| Normal run | `%USERPROFILE%\VRCHub\plugins` on Windows, `~/VRCHub/plugins` on Linux/macOS |
+| Portable / USB stick | `plugins` next to `vrchub.py` |
+
+The Plugins tab prints the exact path it is scanning at the top, so use that if you are unsure. Files starting with `_` are ignored, and a plugin that fails to load is listed in red with the error instead of breaking the app.
 
 ## Template
 
